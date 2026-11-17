@@ -1,4 +1,6 @@
-FROM nginxinc/nginx-unprivileged:stable-alpine@sha256:f5116ed4606f3eb015dd4a8e28cb9b351476dc0ad4bc6e9f93b19cec130cdf03
+FROM nginx/nginx-unprivileged:stable-alpine-slim@sha256:30b5b66412019e6860fb900420758f664f770082d142b614db0d9afadfede1d3
+USER 0
+RUN apk add --no-cache --upgrade 'zlib>=1.4-r0'
 
 LABEL org.opencontainers.image.title="Dyntick" \
       org.opencontainers.image.description="Your personal study space, one thing at a time."
