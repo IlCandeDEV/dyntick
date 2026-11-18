@@ -1,0 +1,4 @@
+services:
+  dyntick:
+    image: dyntick-ci:latest
+    pull_policy: never

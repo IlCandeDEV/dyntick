@@ -1,12 +1,27 @@
-FROM nginx/nginx-unprivileged:stable-alpine-slim@sha256:30b5b66412019e6860fb900420758f664f770082d142b614db0d9afadfede1d3
+# syntax=docker/dockerfile:1
+ARG DENO_VERSION=2.9.8
+FROM --platform=$BUILDPLATFORM denoland/deno:${DENO_VERSION} AS build
+
+WORKDIR /app
+COPY deno.json deno.lock ./
+RUN deno install --frozen --allow-scripts=npm:esbuild
+COPY index.html vite.config.ts ./
+COPY public ./public
+COPY src ./src
+RUN deno task build
+
+FROM nginx/nginx-unprivileged:stable-alpine-slim@sha256:30b5b66412019e6860fb900420758f664f770082d142b614db0d9afadfede1d3 AS runtime
 USER 0
 RUN apk add --no-cache --upgrade 'zlib>=1.4-r0'
 
 LABEL org.opencontainers.image.title="Dyntick" \
+      org.opencontainers.image.source="https://github.com/IlCandeDEV/dyntick" \
+      org.opencontainers.image.licenses="PolyForm-Noncommercial-1.0.0" \
       org.opencontainers.image.description="Your personal study space, one thing at a time."
 
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-COPY site/ /usr/share/nginx/html/
+COPY deploy/nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /app/dist /usr/share/nginx/html
+COPY LICENSE /usr/share/nginx/html/LICENSE.txt
 USER 101
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \

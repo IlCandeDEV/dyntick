@@ -2,10 +2,8 @@ name: dyntick
 
 services:
   dyntick:
-    image: dyntick-local:${DYNTICK_VERSION:-latest}
-    pull_policy: build
-    build:
-      context: https://github.com/IlCandeDEV/dyntick.git#${DYNTICK_VERSION:-latest}
+    image: ghcr.io/ilcandedev/dyntick-runtime:${DYNTICK_VERSION:-latest}
+    pull_policy: always
     restart: unless-stopped
     ports:
       - "${PORT:-8080}:8080"

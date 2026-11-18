@@ -1,0 +1,53 @@
+name: Release Dyntick
+run-name: Release Dyntick ${{ inputs.version }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Verified stable version
+        type: string
+        required: true
+        default: "1.5.0"
+      ci_run:
+        description: Successful Verify Dyntick run on this main commit
+        type: string
+        required: true
+      image_run:
+        description: Successful Publish runtime image run for this version
+        type: string
+        required: true
+
+permissions:
+  contents: write
+  actions: write
+  packages: read
+
+concurrency:
+  group: dyntick-release-publication
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ inputs.version }}
+      CI_RUN: ${{ inputs.ci_run }}
+      IMAGE_RUN: ${{ inputs.image_run }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Audit the exact verified distribution before publication
+        run: python3 scripts/runtime_image.py stage --version "$VERSION" --ci-run "$CI_RUN" --directory .ci-output/release-distribution --proof .ci-output/release-input.json
+      - name: Publish source tags, pinned Compose and verified runtime proof
+        run: python3 scripts/publish-distribution.py .ci-output/release-distribution --version "$VERSION" --ci-run "$CI_RUN" --image-run "$IMAGE_RUN" --publish
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: release-publication
+          path: |
+            .ci-output/publication-*.json
+            .ci-output/release-input.json
+          if-no-files-found: ignore

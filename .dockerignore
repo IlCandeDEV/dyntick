@@ -1,0 +1,12 @@
+.git
+.github
+node_modules
+dist
+.env
+.DS_Store
+coverage
+test-results
+playwright-report
+.ci-output
+__pycache__
+*.pyc

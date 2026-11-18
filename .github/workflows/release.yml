@@ -1,0 +1,19 @@
+name: Prepare Dyntick release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Distribution version, for example 1.5.0
+        required: true
+        default: "1.5.0"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    uses: ./.github/workflows/ci.yml
+    with:
+      version: ${{ inputs.version }}

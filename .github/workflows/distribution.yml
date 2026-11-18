@@ -1,0 +1,94 @@
+name: Verify public distribution
+run-name: Verify installation ${{ inputs.version }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Published stable distribution version
+        required: true
+        default: "1.5.0"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        channel: [latest, version, override]
+        architecture: [amd64, arm64]
+    env:
+      VERSION: ${{ inputs.version }}
+      CHANNEL: ${{ matrix.channel }}
+      ARCHITECTURE: ${{ matrix.architecture }}
+      PORT: "18082"
+      COMPOSE_PROJECT_NAME: dyntick-distribution-verification
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-qemu-action@v3
+        if: matrix.architecture == 'arm64'
+        with:
+          platforms: arm64
+      - name: Verify rolling and pinned Compose generation
+        run: |
+          python3 -m unittest discover -s tests -p 'release_compose_test.py' -v
+          python3 -m py_compile scripts/publish-distribution.py
+      - name: Download only the public Compose without credentials
+        run: |
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/dyntick-compose-only" "$RUNNER_TEMP/dyntick-anonymous"
+          echo "DOCKER_CONFIG=$RUNNER_TEMP/dyntick-anonymous" >> "$GITHUB_ENV"
+          if [[ "$CHANNEL" == version ]]; then
+            url="https://github.com/IlCandeDEV/dyntick/releases/download/v$VERSION/compose.yaml"
+          else
+            url="https://raw.githubusercontent.com/IlCandeDEV/dyntick/latest/compose.yaml"
+          fi
+          if [[ "$CHANNEL" == override ]]; then
+            echo "DYNTICK_VERSION=$VERSION" >> "$GITHUB_ENV"
+          fi
+          curl --fail --silent --show-error --location --retry 5 --retry-all-errors --retry-delay 2 "$url" --output "$RUNNER_TEMP/dyntick-compose-only/compose.yaml"
+          printf 'services:\n  dyntick:\n    platform: linux/%s\n' "$ARCHITECTURE" > "$RUNNER_TEMP/dyntick-platform.yaml"
+      - name: Start from a folder containing only the Compose file
+        working-directory: ${{ runner.temp }}/dyntick-compose-only
+        run: |
+          test "$(find . -type f | wc -l)" -eq 1
+          docker compose -f compose.yaml -f "$RUNNER_TEMP/dyntick-platform.yaml" config --format json > "$RUNNER_TEMP/dyntick-config.json"
+          python3 - <<'PYCODE'
+          import json, os
+          from pathlib import Path
+          service = json.loads((Path(os.environ["RUNNER_TEMP"]) / "dyntick-config.json").read_text())["services"]["dyntick"]
+          channel, version = os.environ["CHANNEL"], os.environ["VERSION"]
+          expected = "latest" if channel == "latest" else version
+          assert service["image"] == f"ghcr.io/ilcandedev/dyntick-runtime:{expected}", service
+          assert "build" not in service, "The server must never build or install packages"
+          assert service["pull_policy"] == "always"
+          assert service["platform"] == "linux/" + os.environ["ARCHITECTURE"]
+          PYCODE
+          docker compose -f compose.yaml -f "$RUNNER_TEMP/dyntick-platform.yaml" up -d --wait --wait-timeout 90
+      - name: Check the real public runtime and anonymous image index
+        run: |
+          python3 scripts/smoke.py http://127.0.0.1:18082
+          docker compose -f "$RUNNER_TEMP/dyntick-compose-only/compose.yaml" -f "$RUNNER_TEMP/dyntick-platform.yaml" exec -T dyntick sh -c 'test "$(id -u)" = 101 && wget -q -O /dev/null http://127.0.0.1:8080/healthz'
+          python3 - <<'PYCODE'
+          import os, sys
+          sys.path.insert(0, "scripts")
+          from runtime_image import anonymous_manifest
+          version = os.environ["VERSION"]
+          numbered, _ = anonymous_manifest(version)
+          selected, _ = anonymous_manifest("latest" if os.environ["CHANNEL"] == "latest" else version)
+          assert selected == numbered, "The public channel must use the verified stable image"
+          print("Verified anonymous Compose startup and amd64/arm64 image index:", selected)
+          PYCODE
+      - name: Stop the verification container
+        if: always()
+        working-directory: ${{ runner.temp }}/dyntick-compose-only
+        run: |
+          docker compose -f compose.yaml -f "$RUNNER_TEMP/dyntick-platform.yaml" logs
+          docker compose -f compose.yaml -f "$RUNNER_TEMP/dyntick-platform.yaml" down --remove-orphans

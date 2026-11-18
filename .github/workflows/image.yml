@@ -1,0 +1,147 @@
+name: Publish runtime image
+run-name: Runtime ${{ inputs.version }} ${{ inputs.operation }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Publish a verified numbered image, or advance latest after the public release
+        type: choice
+        options: [publish, latest]
+        default: publish
+        required: true
+      version:
+        description: Stable runtime version
+        type: string
+        default: "1.5.0"
+        required: true
+      ci_run:
+        description: Successful production verification run
+        type: string
+        required: true
+      image_run:
+        description: Successful numbered image run (latest operation only)
+        type: string
+        default: "0"
+
+permissions:
+  contents: read
+  actions: read
+  packages: write
+  id-token: write
+  attestations: write
+
+concurrency:
+  group: dyntick-runtime-publication
+  cancel-in-progress: false
+
+env:
+  VERSION: ${{ inputs.version }}
+  CI_RUN: ${{ inputs.ci_run }}
+  IMAGE_RUN: ${{ inputs.image_run }}
+  IMAGE: ghcr.io/ilcandedev/dyntick-runtime
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  publish:
+    if: inputs.operation == 'publish' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - name: Download and audit the exact successful CI artifact
+        run: python3 scripts/runtime_image.py stage --version "$VERSION" --ci-run "$CI_RUN" --directory .ci-output/runtime-distribution --proof .ci-output/runtime-image-proof.json
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Build only the compiled distribution for both platforms
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .ci-output/runtime-distribution
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ghcr.io/ilcandedev/dyntick-runtime:candidate-${{ inputs.version }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/IlCandeDEV/dyntick
+            org.opencontainers.image.version=${{ inputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          provenance: false
+          sbom: false
+      - name: Install the checksum-verified image scanner
+        env:
+          TRIVY_VERSION: "0.76.2"
+        run: |
+          mkdir -p "$RUNNER_TEMP/trivy" .ci-output/runtime-image-security
+          curl --fail --silent --show-error --location --retry 3 "https://github.com/aquasecurity/trivy/releases/download/v$TRIVY_VERSION/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" -o "$RUNNER_TEMP/trivy/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          curl --fail --silent --show-error --location --retry 3 "https://github.com/aquasecurity/trivy/releases/download/v$TRIVY_VERSION/trivy_${TRIVY_VERSION}_checksums.txt" -o "$RUNNER_TEMP/trivy/checksums.txt"
+          cd "$RUNNER_TEMP/trivy"
+          grep " trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz$" checksums.txt | sha256sum --check --strict
+          tar -xzf "trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" trivy
+      - name: Run, audit and scan both exact registry platforms before versioning
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          for architecture in amd64 arm64; do
+            platform_digest=$(python3 scripts/runtime_image.py platform --version "$VERSION" --digest "$DIGEST" --architecture "$architecture")
+            platform_image="$IMAGE@$platform_digest"
+            docker pull --platform "linux/$architecture" "$platform_image"
+            docker run --platform "linux/$architecture" -d --name "dyntick-registry-$architecture" --read-only --tmpfs /tmp:rw,noexec,nosuid,size=16m --cap-drop ALL --security-opt no-new-privileges:true -p 127.0.0.1:18084:8080 "$platform_image"
+            curl --fail --silent --show-error --retry 20 --retry-all-errors --retry-delay 1 --retry-max-time 40 http://127.0.0.1:18084/healthz
+            python3 scripts/smoke.py http://127.0.0.1:18084
+            test "$(docker exec "dyntick-registry-$architecture" id -u)" = 101
+            docker exec "dyntick-registry-$architecture" wget -q -O /dev/null http://127.0.0.1:8080/healthz
+            python3 scripts/check-runtime-image.py "$platform_image" "dyntick-registry-$architecture" "$architecture" .ci-output/runtime-distribution
+            "$RUNNER_TEMP/trivy/trivy" image --scanners vuln --format json --output ".ci-output/runtime-image-security/$architecture.json" "$platform_image"
+            "$RUNNER_TEMP/trivy/trivy" image --scanners vuln --severity HIGH,CRITICAL --exit-code 1 "$platform_image"
+            docker rm -f "dyntick-registry-$architecture"
+          done
+      - name: Attest the image's public source and build origin
+        uses: actions/attest@v4
+        with:
+          subject-name: ghcr.io/ilcandedev/dyntick-runtime
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+      - name: Verify the signed public build provenance
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: gh attestation verify "oci://$IMAGE@$DIGEST" --repo "$GITHUB_REPOSITORY"
+      - name: Create the immutable version only after every image check passes
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: python3 scripts/runtime_image.py record --version "$VERSION" --proof .ci-output/runtime-image-proof.json --digest "$DIGEST"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: runtime-image-proof
+          path: .ci-output/runtime-image-proof.json
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: runtime-image-security
+          path: .ci-output/runtime-image-security/
+          if-no-files-found: ignore
+      - name: Stop any remaining verification containers
+        if: always()
+        run: docker rm -f dyntick-registry-amd64 dyntick-registry-arm64 || true
+
+  latest:
+    if: inputs.operation == 'latest' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Advance registry latest only to the current verified public release
+        run: python3 scripts/runtime_image.py latest --version "$VERSION" --ci-run "$CI_RUN" --image-run "$IMAGE_RUN"

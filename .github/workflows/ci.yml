@@ -1,0 +1,139 @@
+name: Verify Dyntick
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Distribution version
+        default: "1.5.0"
+        type: string
+  workflow_call:
+    inputs:
+      version:
+        default: "1.5.0"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      PORT: "18080"
+      DYNTICK_VERSION: ${{ inputs.version || '1.5.0' }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check distribution helpers
+        run: |
+          python3 -m unittest discover -s tests -p 'release_compose_test.py' -v
+          python3 -m py_compile scripts/publish-distribution.py scripts/runtime_image.py scripts/check-runtime-image.py
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: "2.9.8"
+          cache: true
+      - name: Install exactly the locked dependencies
+        run: deno install --frozen --allow-scripts=npm:esbuild
+      - name: Check TypeScript
+        run: deno task check
+      - name: Test timer and persistence
+        run: deno task test
+      - name: Build static application
+        run: deno task build
+      - name: Prepare an allowlisted distribution with an empty README
+        run: python3 scripts/prepare-distribution.py --version "$DYNTICK_VERSION"
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+      - name: Build production image
+        uses: docker/build-push-action@v7
+        with:
+          context: .ci-output/distribution
+          load: true
+          push: false
+          tags: dyntick-ci:latest
+          provenance: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Verify the source Dockerfile runtime
+        run: |
+          docker build --target runtime -t dyntick-dev-ci:latest .
+          docker run -d --name dyntick-dev-ci --read-only --tmpfs /tmp:rw,noexec,nosuid,size=16m --cap-drop ALL --security-opt no-new-privileges:true -p 127.0.0.1:18083:8080 dyntick-dev-ci:latest
+          curl --fail --silent --show-error --retry 20 --retry-all-errors --retry-delay 1 --retry-max-time 40 http://127.0.0.1:18083/healthz
+          python3 scripts/smoke.py http://127.0.0.1:18083
+          test "$(docker exec dyntick-dev-ci id -u)" = 101
+          docker exec dyntick-dev-ci wget -q -O /dev/null http://127.0.0.1:8080/healthz
+      - name: Build and run the arm64 production image
+        run: |
+          docker buildx build --platform linux/arm64 --load -t dyntick-ci:arm64 .ci-output/distribution
+          docker run --platform linux/arm64 -d --name dyntick-arm64-ci --read-only --tmpfs /tmp:rw,noexec,nosuid,size=16m --cap-drop ALL --security-opt no-new-privileges:true -p 127.0.0.1:18081:8080 dyntick-ci:arm64
+          curl --fail --silent --show-error --retry 20 --retry-all-errors --retry-delay 1 --retry-max-time 40 http://127.0.0.1:18081/healthz
+          python3 scripts/smoke.py http://127.0.0.1:18081
+          test "$(docker exec dyntick-arm64-ci id -u)" = 101
+          docker exec dyntick-arm64-ci wget -q -O /dev/null http://127.0.0.1:8080/healthz
+      - name: Validate Compose and start production container
+        run: |
+          docker compose -f compose.yaml -f deploy/compose.ci.yaml config --quiet
+          docker compose -f compose.yaml -f deploy/compose.ci.yaml up -d --no-build --pull never --wait --wait-timeout 60
+          python3 scripts/smoke.py http://127.0.0.1:18080
+          test "$(docker compose -f compose.yaml -f deploy/compose.ci.yaml exec -T dyntick id -u)" = 101
+      - name: Scan the production image with the current vulnerability database
+        id: image_scan
+        continue-on-error: true
+        env:
+          TRIVY_VERSION: "0.76.2"
+        run: |
+          mkdir -p "$RUNNER_TEMP/trivy" .ci-output/security
+          curl --fail --silent --show-error --location --retry 3 "https://github.com/aquasecurity/trivy/releases/download/v$TRIVY_VERSION/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" -o "$RUNNER_TEMP/trivy/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          curl --fail --silent --show-error --location --retry 3 "https://github.com/aquasecurity/trivy/releases/download/v$TRIVY_VERSION/trivy_${TRIVY_VERSION}_checksums.txt" -o "$RUNNER_TEMP/trivy/checksums.txt"
+          cd "$RUNNER_TEMP/trivy"
+          grep " trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz$" checksums.txt | sha256sum --check --strict
+          tar -xzf "trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" trivy
+          cd "$GITHUB_WORKSPACE"
+          "$RUNNER_TEMP/trivy/trivy" image --scanners vuln --format json --output .ci-output/security/runtime-image.json dyntick-ci:latest
+          "$RUNNER_TEMP/trivy/trivy" image --scanners vuln --format json --output .ci-output/security/runtime-arm64.json dyntick-ci:arm64
+          "$RUNNER_TEMP/trivy/trivy" image --scanners vuln --format json --output .ci-output/security/source-runtime.json dyntick-dev-ci:latest
+          for image in dyntick-ci:latest dyntick-ci:arm64 dyntick-dev-ci:latest; do
+            "$RUNNER_TEMP/trivy/trivy" image --scanners vuln --severity HIGH,CRITICAL --exit-code 1 "$image"
+          done
+          docker compose -f compose.yaml -f deploy/compose.ci.yaml exec -T dyntick nginx -T > .ci-output/security/nginx-effective.txt 2>&1
+      - name: Install a browser on the GitHub runner only
+        run: deno run -A npm:playwright@1 install --with-deps chromium
+      - name: Verify real interface and capture desktop/mobile screenshots
+        run: deno task test:browser
+      - name: Browser screenshots
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: browser-screenshots
+          path: .ci-output/screenshots/
+          if-no-files-found: ignore
+      - name: Image vulnerability evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: runtime-security
+          path: .ci-output/security/
+          if-no-files-found: ignore
+      - name: Clean public distribution files
+        uses: actions/upload-artifact@v7
+        with:
+          name: distribution
+          path: .ci-output/distribution/
+          if-no-files-found: error
+      - name: Stop test container
+        if: always()
+        run: |
+          docker compose -f compose.yaml -f deploy/compose.ci.yaml logs
+          docker compose -f compose.yaml -f deploy/compose.ci.yaml down --remove-orphans
+          docker rm -f dyntick-dev-ci dyntick-arm64-ci || true
+      - name: Enforce production image security gate
+        if: always() && steps.image_scan.outcome != 'success'
+        run: |
+          echo "The production image security check failed. Publication is blocked; inspect runtime-security."
+          exit 1
