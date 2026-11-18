@@ -114,6 +114,8 @@ def promote_image(version, ci_run, image_run, source_sha):
 
 def verify_release_assets(release, expected):
     assets = {asset["name"]: asset for asset in release["assets"]}
+    if set(expected) != {"compose.yaml"} or set(assets) != {"compose.yaml"} or len(release["assets"]) != 1:
+        raise ValueError("Release attachments must contain only compose.yaml")
     for name, content in expected.items():
         if name not in assets:
             raise ValueError(f"Missing immutable release asset: {name}")
@@ -184,18 +186,19 @@ def main():
     compose_path = assets_path / "compose.yaml"
     subprocess.run([sys.executable, str(Path(__file__).with_name("release-compose.py")),
                     args.version, str(compose_path), "--source", str(stage / "compose.yaml")], check=True)
-    proof_path = assets_path / "runtime-image.json"
+    # The audit record belongs to Actions artifacts, outside the release attachments.
+    proof_path = stage.parent / "runtime-image.json"
     proof_path.write_text(json.dumps(proof, indent=2, sort_keys=True) + "\n")
     notes_path = assets_path / "notes.md"
     notes_path.write_text(caption)
     if not existing:
-        subprocess.run(["gh", "release", "create", "v" + args.version, str(compose_path), str(proof_path),
+        subprocess.run(["gh", "release", "create", "v" + args.version, str(compose_path),
                         "--repo", PUBLIC_REPO, "--verify-tag", "--title", "Dyntick v. " + args.version,
                         "--notes-file", str(notes_path)], check=True)
     release = api(f"repos/{PUBLIC_REPO}/releases/tags/v{args.version}")
     if release["draft"] or release["prerelease"] or release["body"] != caption:
         raise ValueError("Published release description differs from the verified changelog")
-    verify_release_assets(release, {"compose.yaml": compose_path.read_bytes(), "runtime-image.json": proof_path.read_bytes()})
+    verify_release_assets(release, {"compose.yaml": compose_path.read_bytes()})
     promotion_run = promote_image(args.version, args.ci_run, args.image_run, source_sha)
     check_image_release(args.version, args.ci_run, args.image_run, fingerprint, latest=True)
     tag("latest", source_sha)

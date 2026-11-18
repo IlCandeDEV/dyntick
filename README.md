@@ -128,7 +128,7 @@ To restore, keep Dyntick stopped while replacing its database files in the data 
 | Dependency versions and lockfile | [package.json](package.json), [bun.lock](bun.lock) |
 | Tests and build/release automation | [tests](tests), [.github/workflows](.github/workflows) |
 
-The [Actions page](https://github.com/IlCandeDEV/dyntick/actions) exposes production build, browser, persistence, runtime, image privacy and vulnerability checks. Each release includes a `runtime-image.json` file linking its image digest to its public source commit and successful verification runs.
+The [Actions page](https://github.com/IlCandeDEV/dyntick/actions) exposes production build, browser, persistence, runtime, image privacy and vulnerability checks. The only uploaded release attachment is `compose.yaml`. The `runtime-image.json` audit record is stored in the `runtime-image-VERSION` artifact of the release's Actions run; it links the image digest to its public source commit and successful verification runs.
 
 Runtime images carry public source, revision, version and license labels. Signed GitHub build attestations bind the published image digest to the public workflow. With the GitHub CLI, optional verification is:
 
@@ -158,6 +158,8 @@ Maintainers publish a release in this order:
 1. Wait for **Verify Dyntick** on the intended `main` commit.
 2. Run **Publish runtime image**, operation `publish`, with the version and successful CI run ID.
 3. Run **Release Dyntick** with that CI run and successful image run. It verifies the artifact fingerprint and anonymous image access, publishes immutable source tags, the standard release description and pinned Compose, then advances `latest` and verifies public installation.
+
+The release workflow archives `runtime-image.json` in Actions. To preserve a proof attached to an older release before removing that attachment, run **Archive runtime image proof** with its version. The original image proof and signed registry attestations remain available for verification.
 
 Changes to runtime behavior should include focused tests. Keep dependency and font license notices with their files.
 

@@ -1,9 +1,12 @@
 import importlib.util
+import hashlib
+import json
 from pathlib import Path
 import unittest
 from unittest.mock import patch
 import tempfile
 import sys
+from types import SimpleNamespace
 
 root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(root / "scripts"))
@@ -138,6 +141,90 @@ class ReleaseComposeTest(unittest.TestCase):
                     target.unlink()
                 else:
                     target.write_text(previous)
+
+    def test_release_attachments_accept_only_the_matching_compose(self):
+        compose = b"services:\n  dyntick:\n    image: example:2.0.0\n"
+        release = {"assets": [{"name": "compose.yaml", "id": 123}]}
+        with patch.object(publisher.subprocess, "run", return_value=SimpleNamespace(stdout=compose)):
+            publisher.verify_release_assets(release, {"compose.yaml": compose})
+            with self.assertRaisesRegex(ValueError, "differs"):
+                publisher.verify_release_assets(release, {"compose.yaml": b"changed"})
+
+    def test_release_attachments_reject_extra_missing_or_duplicate_files(self):
+        compose = {"name": "compose.yaml", "id": 123}
+        for assets in [[], [compose, {"name": "runtime-image.json", "id": 124}],
+                       [compose, {"name": "notes.md", "id": 125}], [compose, compose]]:
+            with self.subTest(assets=assets), patch.object(publisher.subprocess, "run") as download:
+                with self.assertRaisesRegex(ValueError, "only compose.yaml"):
+                    publisher.verify_release_assets({"assets": assets}, {"compose.yaml": b"compose"})
+                download.assert_not_called()
+
+    def _archive_fixture(self):
+        source, digest = "b" * 40, "sha256:" + "d" * 64
+        proof = {"image": runtime_image.IMAGE, "version": "2.0.0", "ci_run": 123,
+            "fingerprint": "f" * 64, "artifact_digest": "sha256:" + "a" * 64,
+            "source_sha": source, "digest": digest, "source_repository": runtime_image.SOURCE_REPO,
+            "source_url": f"https://github.com/{runtime_image.SOURCE_REPO}/commit/{source}",
+            "license": "PolyForm-Noncommercial-1.0.0", "architectures": runtime_image.ARCHITECTURES}
+        release = {"tag_name": "v2.0.0", "draft": False, "prerelease": False,
+            "assets": [{"name": "compose.yaml", "id": 100}, {"name": "runtime-image.json", "id": 101}]}
+        def read_api(path):
+            if path == f"repos/{runtime_image.PUBLIC_REPO}/releases/tags/v2.0.0":
+                return release
+            if path == f"repos/{runtime_image.PUBLIC_REPO}/git/ref/tags/v2.0.0":
+                return {"object": {"type": "commit", "sha": source}}
+            raise AssertionError("Unexpected API request: " + path)
+        return proof, release, source, digest, read_api
+
+    def test_archive_preserves_original_runtime_proof_bytes(self):
+        proof, release, source, digest, read_api = self._archive_fixture()
+        original = (json.dumps(proof, indent=4) + "\n").encode()
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(runtime_image, "api", side_effect=read_api), \
+                patch.object(runtime_image.subprocess, "run", return_value=SimpleNamespace(stdout=original)), \
+                patch.object(runtime_image, "successful_run", return_value={"head_sha": source}), \
+                patch.object(runtime_image, "anonymous_manifest", return_value=(digest, {})):
+            output = Path(directory) / "artifact"
+            record = runtime_image.archive_release_proof("2.0.0", output)
+            self.assertEqual([p.name for p in output.iterdir()], ["runtime-image.json"])
+            self.assertEqual((output / "runtime-image.json").read_bytes(), original)
+            self.assertEqual(record["sha256"], hashlib.sha256(original).hexdigest())
+            self.assertEqual(record["release_asset_id"], 101)
+
+    def test_archive_rejects_verification_of_another_source_commit(self):
+        proof, release, source, digest, read_api = self._archive_fixture()
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(runtime_image, "api", side_effect=read_api), \
+                patch.object(runtime_image.subprocess, "run", return_value=SimpleNamespace(stdout=json.dumps(proof).encode())), \
+                patch.object(runtime_image, "successful_run", return_value={"head_sha": "c" * 40}), \
+                patch.object(runtime_image, "anonymous_manifest") as registry:
+            output = Path(directory) / "artifact"
+            with self.assertRaisesRegex(ValueError, "source commit"):
+                runtime_image.archive_release_proof("2.0.0", output)
+            registry.assert_not_called()
+            self.assertFalse(output.exists())
+
+    def test_archive_rejects_an_image_that_differs_from_the_proof(self):
+        proof, release, source, digest, read_api = self._archive_fixture()
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(runtime_image, "api", side_effect=read_api), \
+                patch.object(runtime_image.subprocess, "run", return_value=SimpleNamespace(stdout=json.dumps(proof).encode())), \
+                patch.object(runtime_image, "successful_run", return_value={"head_sha": source}), \
+                patch.object(runtime_image, "anonymous_manifest", return_value=("sha256:" + "e" * 64, {})):
+            output = Path(directory) / "artifact"
+            with self.assertRaisesRegex(ValueError, "numbered image"):
+                runtime_image.archive_release_proof("2.0.0", output)
+            self.assertFalse(output.exists())
+
+    def test_archive_requires_one_existing_runtime_proof(self):
+        proof, release, source, digest, read_api = self._archive_fixture()
+        release["assets"] = [{"name": "compose.yaml", "id": 100}]
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(runtime_image, "api", side_effect=read_api), \
+                patch.object(runtime_image.subprocess, "run") as download:
+            with self.assertRaisesRegex(ValueError, "one runtime-image.json"):
+                runtime_image.archive_release_proof("2.0.0", Path(directory) / "artifact")
+            download.assert_not_called()
 
 
 if __name__ == "__main__":
