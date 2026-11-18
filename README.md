@@ -6,13 +6,13 @@ Dyntick is a student-made study dashboard with a Pomodoro timer and an activity 
 
 Run it on your personal homelab and use the same timer, preferences and study history from your devices.
 
-![Dyntick 1.5.0 main page in the light theme](docs/screenshots/pomodoro-v1.5.0-light.png)
+![Dyntick 2.0.0 main page in the light theme](docs/screenshots/pomodoro-v2.0.0-light.png)
 
-*Light theme · Dyntick 1.5.0.*
+*Light theme · Dyntick 2.0.0.*
 
-![Dyntick 1.5.0 main page in the dark theme](docs/screenshots/pomodoro-v1.5.0-dark.png)
+![Dyntick 2.0.0 main page in the dark theme](docs/screenshots/pomodoro-v2.0.0-dark.png)
 
-*Dark theme · Dyntick 1.5.0.*
+*Dark theme · Dyntick 2.0.0.*
 
 ## Install
 
