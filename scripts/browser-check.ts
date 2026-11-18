@@ -213,7 +213,8 @@ try {
   // to exercise the actual 1.x -> 2.0 migration, including completion during an absence.
   const desktop = await browser.newContext({ viewport: { width: 1440, height: 1024 }, colorScheme: "light", locale: "it-IT", timezoneId: "Europe/Rome" });
   observe(desktop);
-  await desktop.addInitScript(() => {
+  await desktop.addInitScript((origin) => {
+    if (location.origin !== origin) return;
     if (localStorage.getItem("browser-legacy-seeded")) return;
     const now = Date.now();
     localStorage.setItem("browser-legacy-seeded", "true");
@@ -229,7 +230,7 @@ try {
       endAt: now - 1000, completedFocuses: 3, completionId: 3,
       focusSessionId: "browser-expired-focus", lastFocusCompletion: null,
     }));
-  });
+  }, new URL(base).origin);
   const page = await desktop.newPage();
   await page.goto(base);
   await ready(page);
@@ -392,12 +393,13 @@ try {
   const beforeLaterImport = await snapshot();
   const laterDevice = await browser.newContext({ viewport: { width: 1024, height: 768 } });
   observe(laterDevice);
-  await laterDevice.addInitScript(() => {
+  await laterDevice.addInitScript((origin) => {
+    if (location.origin !== origin) return;
     localStorage.setItem("dyntick.preferences.v1", JSON.stringify({ language: "it", focusMinutes: 50, theme: "dark" }));
     localStorage.setItem("dyntick.activity.v1", JSON.stringify({ version: 1, entries: {
       "browser-later-device": { id: "browser-later-device", completedAt: Date.now() - 300_000, minutes: 50 },
     } }));
-  });
+  }, new URL(base).origin);
   const later = await laterDevice.newPage();
   await later.goto(base);
   await ready(later);

@@ -108,6 +108,7 @@ jobs:
           test "$(docker exec dyntick-arm64-ci id -u)" = 1000
           docker exec dyntick-arm64-ci bun -e 'if (!(await fetch("http://127.0.0.1:8080/healthz")).ok) process.exit(1)'
       - name: Validate Compose and start production container
+        id: production_compose
         run: |
           docker compose -f compose.yaml -f deploy/compose.ci.yaml config --quiet
           docker compose -f compose.yaml -f deploy/compose.ci.yaml up -d --no-build --pull never --wait --wait-timeout 60
@@ -137,6 +138,7 @@ jobs:
       - name: Verify real interface and capture desktop/mobile screenshots
         run: bun run test:browser
       - name: Verify SQLite survives container recreation on both platforms
+        if: always() && steps.production_compose.outcome == 'success'
         run: |
           python3 scripts/persistence-check.py seed http://127.0.0.1:18080 .ci-output/persistence-compose.json
           docker compose -f compose.yaml -f deploy/compose.ci.yaml up -d --force-recreate --no-build --pull never --wait --wait-timeout 90
