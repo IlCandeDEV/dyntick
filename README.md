@@ -4,8 +4,6 @@ A simple yet functional space to study.
 
 Dyntick is a student-made study dashboard with a Pomodoro timer and an activity tracker.
 
-Run it on your personal homelab and use the same timer, preferences and study history from your devices.
-
 ![Dyntick 2.0.0 main page in the light theme](docs/screenshots/pomodoro-v2.0.0-light.png)
 
 *Light theme · Dyntick 2.0.0.*
@@ -33,11 +31,9 @@ ports:
 
 Replace `CUSTOM_PORT` with the port you want to use, then open `http://SERVER_IP:CUSTOM_PORT`. The container continues listening on 8080.
 
-Compose creates the named `dyntick-data` volume and mounts it at `/data`. The SQLite database is stored at `/data/dyntick.sqlite`. The application runs as the unprivileged Bun user, UID/GID `1000:1000`. Its root filesystem is read-only; the database volume and temporary directory remain writable.
-
 ## Upgrade from Dyntick 1.x
 
-**Replace your old Compose file before starting version 2.0.0.** The 1.x Compose has a read-only filesystem and no database volume. Updating its image alone does not provide the persistent storage required by 2.0.0.
+**IF YOU ARE UPDATING FROM 1.x replace your old Compose file before starting version 2.0.0.** The 1.x Compose has a read-only filesystem and no database volume. Updating its image alone does not provide the persistent storage required by 2.0.0.
 
 1. Keep a copy of your current Compose and replace it with the [new Compose](compose.yaml).
 2. Keep the same project folder and your chosen host port, such as `"8090:8080"`.
@@ -51,7 +47,7 @@ Browser storage is tied to its original address. If the address or port has alre
 
 ## Your data and devices
 
-Dyntick 2.0 is a single-user installation with one shared set of data. There are no accounts: every device that can reach the installation can see and change the same data. Use it on your trusted home network or through your existing private remote-access setup.
+Dyntick is a single-user installation with one shared set of data. There are no accounts: every device that can reach the installation can see and change the same data. Use it on your trusted home network or through your existing private remote-access setup.
 
 - Preferences, including language, theme, durations and sound, are saved in SQLite and shared between devices.
 - The current timer is shared too. Starting, pausing, resuming, resetting or changing its mode on one device updates the others.
@@ -63,7 +59,7 @@ Connected pages refresh shared state regularly. The visual countdown follows the
 
 The application, fonts and API are served from your own installation. There is no analytics or telemetry and no external application API is required. The footer opens this repository when you choose its link. Browser storage is used only to recover legacy 1.x data and remember that its import completed.
 
-## Update, pin and stop
+## Updating & versions
 
 The default Compose follows the latest stable image. To update:
 
@@ -87,7 +83,8 @@ Stop Dyntick with:
 docker compose down
 ```
 
-The database volume survives container recreation, normal updates and `docker compose down`. Start again from the same Compose project folder to reuse it. **Do not use `docker compose down -v` unless you intend to delete the saved data.** Keep a backup before future major upgrades or database changes. Version 1.x cannot use the 2.0 database.
+The database volume survives container recreation, normal updates and `docker compose down`. Start again from the same Compose project folder to reuse it. **Do not use `docker compose down -v` unless you intend to delete the saved data.**.
+
 
 ## Back up the database
 
@@ -150,18 +147,6 @@ bun run check
 bun run test
 bun run build
 ```
-
-The production pipeline also runs Python distribution tests, container smoke checks, real-browser checks across independent devices, persistence checks and image scans on AMD64 and ARM64. Source tags point to the exact public commit used by the verified build. Official images are built only from its audited compiled artifact; users download the resulting image rather than compile the application on their PC or NAS.
-
-Maintainers publish a release in this order:
-
-1. Wait for **Verify Dyntick** on the intended `main` commit.
-2. Run **Publish runtime image**, operation `publish`, with the version and successful CI run ID.
-3. Run **Release Dyntick** with that CI run and successful image run. It verifies the artifact fingerprint and anonymous image access, publishes immutable source tags, the standard release description and pinned Compose, then advances `latest` and verifies public installation.
-
-The release workflow archives `runtime-image.json` in Actions. To preserve a proof attached to an older release before removing that attachment, run **Archive runtime image proof** with its version. The original image proof and signed registry attestations remain available for verification.
-
-Changes to runtime behavior should include focused tests. Keep dependency and font license notices with their files.
 
 ## License
 
