@@ -229,6 +229,8 @@ export function usePomodoro() {
 
   return {
     preferences, timer, now,
+    revision: snapshot?.revision ?? -1,
+    instanceId: snapshot?.instanceId,
     activity: snapshot?.activity ?? initialActivity.current,
     connection, busy, conflict, ready,
     controlsDisabled: !ready || connection !== "online" || busy || pending.current !== null,

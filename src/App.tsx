@@ -171,7 +171,8 @@ export function App() {
 
   return (
     <Theme theme={neutralTheme} mode={preferences.theme}>
-      <div className="app-shell" data-mode={timer.mode} data-page={activePage} data-state-ready={pomodoro.ready}>
+      <div className="app-shell" data-mode={timer.mode} data-page={activePage} data-state-ready={pomodoro.ready}
+        data-revision={pomodoro.revision} data-instance={pomodoro.instanceId}>
         <a className="skip-link" href="#pomodoro" onClick={(event) => {
           event.preventDefault();
           selectPage("pomodoro");

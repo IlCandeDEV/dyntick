@@ -41,6 +41,14 @@ async function action(value: unknown) {
 
 async function ready(page: Page) {
   await page.locator('.app-shell[data-state-ready="true"]').waitFor();
+  // A second device receives changes on its next poll. A previously saved view can
+  // still be one revision behind; wait for the rendered server revision before a
+  // controlled test action instead of accidentally exercising a stale command.
+  const { instanceId, revision } = await snapshot();
+  await page.waitForFunction(({ instanceId, revision }) => {
+    const shell = document.querySelector<HTMLElement>(".app-shell");
+    return shell?.dataset.instance === instanceId && Number(shell.dataset.revision) >= revision;
+  }, { instanceId, revision });
   await page.locator('[data-testid="sync-status"][data-sync-state="saved"]').waitFor();
 }
 
@@ -342,6 +350,7 @@ try {
     equal((await snapshot()).preferences.focusMinutes, 30);
     equal((await snapshot()).timer.endAt, deadline, "Saving future durations preserves the current timer");
     await showStudyPage(page, "pomodoro");
+    await ready(second);
     await second.getByRole("button", { name: locale.pause, exact: true }).click();
     await page.getByRole("button", { name: locale.resume, exact: true }).waitFor();
     const samePaused = (await snapshot()).timer.remainingMs;
@@ -463,6 +472,7 @@ try {
   await page.locator('[data-testid="sync-status"][data-sync-state="offline"]').waitFor();
   equal(await page.locator(".primary-action").isDisabled(), true);
   equal(await page.locator(".reset-action").isDisabled(), true);
+  await ready(second);
   await second.getByRole("button", { name: "Switch to light theme", exact: true }).click();
   await second.waitForFunction(() => document.documentElement.dataset.theme === "light");
   await ready(second);
