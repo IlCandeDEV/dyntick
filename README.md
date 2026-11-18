@@ -2,7 +2,7 @@
 
 A simple yet functional space to study.
 
-Dyntick is a student-made study dashboard with a Pomodoro timer and an activity calendar. The source, tests and build workflows are available here for inspection. The application is source available under the **PolyForm Noncommercial License 1.0.0**.
+Dyntick is a student-made study dashboard with a Pomodoro timer and an activity tracker.
 
 ![Dyntick 1.5.0 main page in the light theme](docs/screenshots/pomodoro-v1.5.0-light.png)
 
@@ -14,35 +14,31 @@ Dyntick is a student-made study dashboard with a Pomodoro timer and an activity 
 
 ## Install
 
-Copy [compose.yaml](compose.yaml) into an empty folder on your server and run:
+Copy [compose.yaml](compose.yaml) into an empty folder on your server/homelab and run:
 
 ```sh
 docker compose up -d
 ```
 
-Open `http://SERVER_IP:8080`. Docker automatically pulls the ready-to-run public image for Intel/AMD (AMD64) or ARM64. Installation requires Docker, Docker Compose and internet access to the container registry. A registry login, source checkout, package installation and dedicated builder are unnecessary.
+Open `http://SERVER_IP:8080`. Docker automatically pulls the ready-to-run public image.
 
-To use port 8090, change the Compose port mapping to `"8090:8080"`, or save `PORT=8090` in a `.env` file beside Compose.
-
-The container serves the application as an unprivileged user on port 8080. Compose applies a read-only filesystem, a temporary directory, dropped Linux capabilities and a no-new-privileges restriction.
+To use a custom port, change the Compose port mapping to `"CUSTOM_PORT:8080"`.
 
 ## Update and pin a version
 
 The default Compose follows the latest stable release. Run the same command to check for an update:
 
 ```sh
-docker compose up -d
+docker compose up -d --build --wait
 ```
 
-Add `--wait` to wait until the container is healthy. Updates happen when you run Compose; there is no background updater. Unchanged image layers are reused.
+The `--wait` part makes the service wait until the container is healthy.
 
-For a specific release:
-
+To install a specific release just specify the version before running the docker compose command.
+For example to use the 1.5.0:
 ```sh
-DYNTICK_VERSION=1.5.0 docker compose up -d
+DYNTICK_VERSION=1.5.0 docker compose up -d --build --wait
 ```
-
-Save `DYNTICK_VERSION=1.5.0` in `.env` to keep that choice, or use the pinned Compose attached to the release. Numbered source and image tags are immutable; `latest` follows the newest verified stable release.
 
 Prebuilt images are available from 1.5.0. Older release attachments retain their original installation method. To migrate an older Compose, replace its image with `ghcr.io/ilcandedev/dyntick-runtime:${DYNTICK_VERSION:-latest}`, set `pull_policy: always`, and remove its entire `build` section. Keep your chosen host port.
 
@@ -119,8 +115,6 @@ Maintainers publish a release in this order:
 Changes to runtime behavior should include focused tests. Keep dependency and font license notices with their files.
 
 ## License
-
-Copyright (c) 2026 IlCandeDEV.
 
 Dyntick's application code, documentation and build scripts use the [PolyForm Noncommercial License 1.0.0](LICENSE). You can inspect the code and use, modify and redistribute it for the purposes permitted by that license, including personal study and qualifying noncommercial uses. Commercial use outside those permitted purposes requires a separate permission from the copyright holder.
 
