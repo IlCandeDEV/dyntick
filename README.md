@@ -4,6 +4,14 @@ A simple yet functional space to study.
 
 Dyntick is a student-made study dashboard with a Pomodoro timer and an activity calendar. The source, tests and build workflows are available here for inspection. The application is source available under the **PolyForm Noncommercial License 1.0.0**.
 
+![Dyntick 1.5.0 main page in the light theme](docs/screenshots/pomodoro-v1.5.0-light.png)
+
+*Light theme · Dyntick 1.5.0.*
+
+![Dyntick 1.5.0 main page in the dark theme](docs/screenshots/pomodoro-v1.5.0-dark.png)
+
+*Dark theme · Dyntick 1.5.0.*
+
 ## Install
 
 Copy [compose.yaml](compose.yaml) into an empty folder on your server and run:
