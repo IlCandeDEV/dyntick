@@ -3,13 +3,14 @@ import { Icon } from "./Icons.tsx";
 import { LANGUAGE_OPTIONS } from "./i18n.ts";
 import { isLanguage, type Language } from "./timer.ts";
 
-export function LanguagePicker({ language, label, onChange }: {
+export function LanguagePicker({ language, label, onChange, disabled = false }: {
   language: Language;
   label: string;
   onChange: (language: Language) => void;
+  disabled?: boolean;
 }) {
   return (
-    <Selector label={label} isLabelHidden value={language}
+    <Selector label={label} isLabelHidden value={language} isDisabled={disabled}
       options={[...LANGUAGE_OPTIONS]} onChange={(value) => { if (isLanguage(value)) onChange(value); }}
       variant="secondary" size="sm" presentation="popover" placement="below"
       startIcon={<Icon name="globe" width="17" height="17" />}

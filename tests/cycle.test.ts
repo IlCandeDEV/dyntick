@@ -1,8 +1,9 @@
+import { test } from "bun:test";
 import { deepEqual, equal, ok } from "node:assert/strict";
 import { cyclePhases, cycleLayout } from "../src/cycle.ts";
 import { createTimer, DEFAULT_PREFERENCES, startTimer, settleTimer, type Preferences } from "../src/timer.ts";
 
-Deno.test("configured cycles contain one focus and one following break per session", () => {
+test("configured cycles contain one focus and one following break per session", () => {
   for (const count of [1, 4, 6]) {
     const preferences: Preferences = { ...DEFAULT_PREFERENCES, longBreakInterval: count };
     const phases = cyclePhases(preferences, createTimer(preferences));
@@ -15,7 +16,7 @@ Deno.test("configured cycles contain one focus and one following break per sessi
   }
 });
 
-Deno.test("cycle follows focus, break, long break and restart without changing timer state", () => {
+test("cycle follows focus, break, long break and restart without changing timer state", () => {
   const p = { ...DEFAULT_PREFERENCES, longBreakInterval: 2 };
   let timer = createTimer(p);
   const current = () => cyclePhases(p, timer).find(phase => phase.current)!.id;
@@ -37,14 +38,14 @@ Deno.test("cycle follows focus, break, long break and restart without changing t
   equal(timer.completedFocuses, 0);
 });
 
-Deno.test("manual breaks never imply that planned focus sessions were completed", () => {
+test("manual breaks never imply that planned focus sessions were completed", () => {
   for (const mode of ["shortBreak", "longBreak"] as const) {
     const phases = cyclePhases(DEFAULT_PREFERENCES, createTimer(DEFAULT_PREFERENCES, mode));
     ok(phases.every(phase => !phase.current && !phase.done));
   }
 });
 
-Deno.test("cycle keeps a running phase's original duration while showing new future durations", () => {
+test("cycle keeps a running phase's original duration while showing new future durations", () => {
   const timer = startTimer(createTimer(DEFAULT_PREFERENCES), DEFAULT_PREFERENCES, 1000);
   const snapshot = structuredClone(timer);
   const phases = cyclePhases({ ...DEFAULT_PREFERENCES, focusMinutes: 40, shortBreakMinutes: 8 }, timer);
@@ -54,7 +55,7 @@ Deno.test("cycle keeps a running phase's original duration while showing new fut
   deepEqual(timer, snapshot);
 });
 
-Deno.test("responsive cycles show every target without overflow or overlapping hitboxes", () => {
+test("responsive cycles show every target without overflow or overlapping hitboxes", () => {
   for (const width of [180, 220, 252, 280, 320, 390, 560]) {
     for (let sessions = 1; sessions <= 6; sessions++) {
       const layout = cycleLayout(width, sessions);

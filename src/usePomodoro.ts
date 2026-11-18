@@ -1,13 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { TimerAudio } from "./audio.ts";
-import {
-  ACTIVITY_KEY,
-  mergeActivity,
-  parseActivity,
-  persistActivity,
-  recordCompletion,
-  type StudyActivity,
-} from "./activity.ts";
+import { ACTIVITY_KEY, emptyActivity, parseActivity } from "./activity.ts";
 import {
   browserStorage,
   parsePreferences,
@@ -15,152 +8,218 @@ import {
   PREFERENCES_KEY,
   readStorage,
   TIMER_KEY,
-  writeStorage,
 } from "./storage.ts";
-import {
-  type Mode,
-  pauseTimer,
-  type Preferences,
-  resetTimer,
-  selectMode,
-  settleTimer,
-  startTimer,
-  updateDurations,
-} from "./timer.ts";
+import { createTimer, DEFAULT_PREFERENCES, type Mode, type Preferences } from "./timer.ts";
+import type { Action, Snapshot } from "./protocol.ts";
 
+type Connection = "loading" | "online" | "offline";
+type PendingRequest = { path: string; body: Record<string, unknown> };
+
+function requestId(): string {
+  return globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
+async function request(path: string, body?: Record<string, unknown>) {
+  return fetch(path, {
+    method: body ? "POST" : "GET",
+    cache: "no-store",
+    credentials: "same-origin",
+    headers: body ? { "Content-Type": "application/json", "X-Dyntick-Request": "1" } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(10_000),
+  });
+}
+
+/** The server owns every durable value. Browser storage is read only for v1 migration. */
 export function usePomodoro() {
-  const [preferences, setPreferences] = useState(() =>
-    parsePreferences(readStorage(browserStorage("localStorage"), PREFERENCES_KEY))
-  );
-  const [timer, setTimer] = useState(() =>
-    parseTimer(
-      readStorage(browserStorage("sessionStorage"), TIMER_KEY),
-      preferences,
-      Date.now(),
-    )
-  );
+  const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
+  const snapshotRef = useRef<Snapshot | null>(null);
+  const [connection, setConnection] = useState<Connection>("loading");
+  const [busy, setBusy] = useState(false);
+  const [conflict, setConflict] = useState(false);
+  const [ready, setReady] = useState(false);
+  const readyRef = useRef(false);
+  const pending = useRef<PendingRequest | null>(null);
+  const mutationInFlight = useRef(false);
+  const refreshInFlight = useRef(false);
+  const mounted = useRef(true);
+  const clockOffset = useRef(0);
   const [now, setNow] = useState(Date.now);
-  const [activity, setActivity] = useState(() =>
-    parseActivity(readStorage(browserStorage("localStorage"), ACTIVITY_KEY))
-  );
-  const activityRef = useRef(activity);
-  const [activityPersisted, setActivityPersisted] = useState(true);
-  const [preferencesPersisted, setPreferencesPersisted] = useState(true);
-  const [sessionPersisted, setSessionPersisted] = useState(true);
   const audio = useRef<TimerAudio | null>(null);
-  const notifiedCompletion = useRef(timer.completionId);
+  const notifiedCompletion = useRef<number | null>(null);
+  const defaults = useRef({ ...DEFAULT_PREFERENCES });
+  const initialTimer = useRef(createTimer(defaults.current));
+  const initialActivity = useRef(emptyActivity());
 
   const audioInstance = useCallback(() => audio.current ??= new TimerAudio(), []);
 
-  const syncActivity = useCallback((incoming?: StudyActivity) => {
-    const current = incoming ? mergeActivity(activityRef.current, incoming) : activityRef.current;
-    const result = persistActivity(current, browserStorage("localStorage"));
-    activityRef.current = result.activity;
-    setActivity(result.activity);
-    setActivityPersisted(result.persisted);
+  const accept = useCallback((incoming: Snapshot) => {
+    if (!mounted.current) return;
+    const current = snapshotRef.current;
+    if (current?.instanceId === incoming.instanceId && current.revision > incoming.revision) return;
+    if (current && current.instanceId !== incoming.instanceId) {
+      readyRef.current = false;
+      setReady(false);
+    }
+    clockOffset.current = incoming.serverNow - Date.now();
+    setNow(incoming.serverNow);
+    if (notifiedCompletion.current === null || current?.instanceId !== incoming.instanceId) {
+      notifiedCompletion.current = incoming.timer.completionId;
+    } else if (incoming.timer.completionId > notifiedCompletion.current) {
+      notifiedCompletion.current = incoming.timer.completionId;
+      if (incoming.preferences.soundEnabled) audio.current?.chime();
+    }
+    snapshotRef.current = incoming;
+    setSnapshot(incoming);
   }, []);
 
-  useEffect(() => {
-    // Keep this completion in timer/session storage until history is durable, including
-    // refresh recovery and immediate reset/mode changes after the timer has expired.
-    syncActivity(timer.lastFocusCompletion
-      ? recordCompletion(activityRef.current, timer.lastFocusCompletion)
-      : undefined);
-  }, [timer.lastFocusCompletion, syncActivity]);
-
-  useEffect(() => {
-    const saved = writeStorage(browserStorage("localStorage"), PREFERENCES_KEY, preferences);
-    setPreferencesPersisted(saved);
-  }, [preferences]);
-
-  useEffect(() => {
-    setSessionPersisted(writeStorage(browserStorage("sessionStorage"), TIMER_KEY, timer));
-  }, [timer]);
-
-  useEffect(() => {
-    const refresh = () => {
-      const timestamp = Date.now();
-      setNow(timestamp);
-      setTimer((state) => settleTimer(state, timestamp));
-    };
-    refresh();
-    // The idle clock also rolls the activity calendar over at local midnight.
-    const interval = globalThis.setInterval(refresh, timer.status === "running" ? 250 : 60_000);
-    const onVisible = () => {
-      if (document.visibilityState === "visible") {
-        refresh();
-        syncActivity();
+  const sendPending = useCallback(async (): Promise<boolean> => {
+    const operation = pending.current;
+    if (!operation || mutationInFlight.current) return false;
+    mutationInFlight.current = true;
+    if (mounted.current) setBusy(true);
+    try {
+      const response = await request(operation.path, operation.body);
+      if (response.status === 409) {
+        const result = await response.json() as { state: Snapshot };
+        accept(result.state);
+        pending.current = null;
+        if (mounted.current) { setConflict(true); setConnection("online"); }
+        return false;
       }
-    };
-    const onResume = () => { refresh(); syncActivity(); };
-    document.addEventListener("visibilitychange", onVisible);
-    globalThis.addEventListener("pageshow", onResume);
-    globalThis.addEventListener("focus", onResume);
+      if (!response.ok) throw new Error(`Persistence request failed (${response.status})`);
+      const result = await response.json() as Snapshot;
+      accept(result);
+      pending.current = null;
+      if (mounted.current) { setConflict(false); setConnection("online"); }
+      return true;
+    } catch {
+      // Keep the same request ID: a disconnected response may already have committed.
+      // Replaying it after reconnect cannot start, pause or import the session twice.
+      if (mounted.current) setConnection("offline");
+      return false;
+    } finally {
+      mutationInFlight.current = false;
+      if (mounted.current) setBusy(false);
+    }
+  }, [accept]);
+
+  const refresh = useCallback(async () => {
+    if (refreshInFlight.current || mutationInFlight.current) return;
+    refreshInFlight.current = true;
+    try {
+      if (pending.current) {
+        if (!await sendPending()) return;
+      }
+      const response = await request("/api/state");
+      if (!response.ok) throw new Error(`State request failed (${response.status})`);
+      const current = await response.json() as Snapshot;
+      // A GET that began before a command must not clear a later saving/offline state.
+      // The pending request is reconciled by its own idempotent response or replay.
+      if (pending.current || mutationInFlight.current) return;
+      const previous = snapshotRef.current;
+      if (previous && previous.instanceId !== current.instanceId) {
+        readyRef.current = false;
+        if (mounted.current) { setReady(false); setConflict(false); }
+      }
+      accept(current);
+      const storage = browserStorage("localStorage");
+      const migrationKey = `dyntick.migrated.v2.${current.instanceId}`;
+      // Preserve the old keys as a backup. Only confirmed imports get a marker.
+      if (!readyRef.current && readStorage(storage, migrationKey) !== "done") {
+        const preferencesRaw = readStorage(storage, PREFERENCES_KEY);
+        const timerRaw = readStorage(browserStorage("sessionStorage"), TIMER_KEY);
+        const activityRaw = readStorage(storage, ACTIVITY_KEY);
+        // Opening a new device must not revise an already initialized shared timer.
+        const hasLegacyData = preferencesRaw !== null || timerRaw !== null || activityRaw !== null;
+        if (!current.initialized || hasLegacyData) {
+          const preferences = preferencesRaw ? parsePreferences(preferencesRaw) : current.preferences;
+          pending.current = {
+            path: "/api/import",
+            body: {
+              requestId: requestId(),
+              instanceId: current.instanceId,
+              ...(preferencesRaw ? { preferences } : {}),
+              ...(timerRaw ? { timer: parseTimer(timerRaw, preferences, current.serverNow) } : {}),
+              ...(activityRaw ? { activity: parseActivity(activityRaw) } : {}),
+            },
+          };
+          if (!await sendPending()) return;
+        }
+        try { storage?.setItem(migrationKey, "done"); } catch { /* Reimport is idempotent. */ }
+      }
+      if (mounted.current) {
+        readyRef.current = true;
+        setReady(true);
+        setConnection("online");
+      }
+    } catch {
+      if (mounted.current) setConnection("offline");
+    } finally {
+      refreshInFlight.current = false;
+    }
+  }, [accept, sendPending]);
+
+  useEffect(() => {
+    mounted.current = true;
+    void refresh();
+    const interval = globalThis.setInterval(() => { void refresh(); }, 1000);
+    const resume = () => { if (document.visibilityState === "visible") void refresh(); };
+    document.addEventListener("visibilitychange", resume);
+    globalThis.addEventListener("focus", resume);
+    globalThis.addEventListener("pageshow", resume);
     return () => {
+      mounted.current = false;
       globalThis.clearInterval(interval);
-      document.removeEventListener("visibilitychange", onVisible);
-      globalThis.removeEventListener("pageshow", onResume);
-      globalThis.removeEventListener("focus", onResume);
+      document.removeEventListener("visibilitychange", resume);
+      globalThis.removeEventListener("focus", resume);
+      globalThis.removeEventListener("pageshow", resume);
     };
-  }, [timer.status, timer.endAt, syncActivity]);
+  }, [refresh]);
 
   useEffect(() => {
-    if (timer.completionId <= notifiedCompletion.current) return;
-    notifiedCompletion.current = timer.completionId;
-    if (preferences.soundEnabled) audio.current?.chime();
-  }, [timer.completionId, preferences.soundEnabled]);
-
-  useEffect(() => {
-    const sync = (event: StorageEvent) => {
-      if (event.storageArea !== browserStorage("localStorage")) return;
-      if (event.key === ACTIVITY_KEY) {
-        // The event can contain a concurrent write that has already been overwritten.
-        // Merge its payload as well as the latest stored map before persisting a union.
-        syncActivity(parseActivity(event.newValue));
-        return;
-      }
-      if (event.key !== PREFERENCES_KEY) return;
-      const next = parsePreferences(event.newValue);
-      setPreferences(next);
-      setTimer((state) => updateDurations(state, next));
-    };
-    globalThis.addEventListener("storage", sync);
-    return () => globalThis.removeEventListener("storage", sync);
-  }, [syncActivity]);
+    const interval = globalThis.setInterval(() => setNow(Date.now() + clockOffset.current), 250);
+    return () => globalThis.clearInterval(interval);
+  }, []);
 
   useEffect(() => () => {
     audio.current?.dispose();
     audio.current = null;
   }, []);
 
-  const savePreferences = useCallback((next: Preferences) => {
-    setPreferences(next);
-    setTimer((state) => updateDurations(state, next));
+  const perform = useCallback(async (action: Action): Promise<boolean> => {
+    // Compare against the state shown to the user, never a newer unrendered poll.
+    const current = snapshot;
+    if (!readyRef.current || !current || mutationInFlight.current || pending.current || connection !== "online") return false;
+    pending.current = {
+      path: "/api/action",
+      body: { requestId: requestId(), instanceId: current.instanceId, revision: current.revision, action },
+    };
+    setConflict(false);
+    return sendPending();
+  }, [connection, sendPending, snapshot]);
+
+  const preferences = snapshot?.preferences ?? defaults.current;
+  const timer = snapshot?.timer ?? initialTimer.current;
+
+  const savePreferences = useCallback(async (next: Preferences) => {
+    const current = snapshotRef.current;
+    if (!current) return false;
+    const patch = Object.fromEntries(Object.entries(next).filter(([key, value]) =>
+      value !== preferences[key as keyof Preferences]
+    )) as Partial<Preferences>;
+    if (Object.keys(patch).length === 0) return true;
     if (next.soundEnabled) void audioInstance().unlock();
-  }, [audioInstance]);
+    return perform({ type: "preferences", patch });
+  }, [audioInstance, perform, preferences]);
 
-  const primaryAction = useCallback(() => {
-    const timestamp = Date.now();
-    setNow(timestamp);
+  const primaryAction = useCallback(async () => {
     if (preferences.soundEnabled) void audioInstance().unlock();
-    setTimer((state) => state.status === "running"
-      ? pauseTimer(state, timestamp)
-      : startTimer(state, preferences, timestamp)
-    );
-  }, [preferences, audioInstance]);
+    return perform({ type: timer.status === "running" ? "pause" : "start" });
+  }, [audioInstance, perform, preferences.soundEnabled, timer.status]);
 
-  const reset = useCallback(() => {
-    const timestamp = Date.now();
-    setNow(timestamp);
-    setTimer((state) => resetTimer(settleTimer(state, timestamp), preferences));
-  }, [preferences]);
-
-  const changeMode = useCallback((mode: Mode) => {
-    const timestamp = Date.now();
-    setNow(timestamp);
-    setTimer((state) => selectMode(settleTimer(state, timestamp), mode, preferences));
-  }, [preferences]);
-
+  const reset = useCallback(() => perform({ type: "reset" }), [perform]);
+  const changeMode = useCallback((mode: Mode) => perform({ type: "mode", mode }), [perform]);
   const previewSound = useCallback(async () => {
     const instance = audioInstance();
     const available = await instance.unlock();
@@ -169,16 +228,13 @@ export function usePomodoro() {
   }, [audioInstance]);
 
   return {
-    preferences,
-    timer,
-    now,
-    activity,
-    activityPersisted,
-    storageAvailable: preferencesPersisted && sessionPersisted && activityPersisted,
-    savePreferences,
-    primaryAction,
-    reset,
-    changeMode,
-    previewSound,
+    preferences, timer, now,
+    activity: snapshot?.activity ?? initialActivity.current,
+    connection, busy, conflict, ready,
+    controlsDisabled: !ready || connection !== "online" || busy || pending.current !== null,
+    retry: refresh,
+    activityPersisted: connection === "online" && !busy,
+    storageAvailable: connection === "online" && !busy,
+    savePreferences, primaryAction, reset, changeMode, previewSound,
   };
 }

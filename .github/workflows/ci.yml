@@ -8,13 +8,17 @@ on:
     inputs:
       version:
         description: Distribution version
-        default: "1.5.0"
+        default: "2.0.0"
         type: string
   workflow_call:
     inputs:
       version:
-        default: "1.5.0"
+        default: "2.0.0"
         type: string
+      resolve_lock:
+        description: Bootstrap a candidate Bun lockfile on the runner; never publish this run
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -22,31 +26,58 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
       PORT: "18080"
-      DYNTICK_VERSION: ${{ inputs.version || '1.5.0' }}
+      DYNTICK_VERSION: ${{ inputs.version || '2.0.0' }}
     steps:
       - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - name: Resolve the candidate Bun base digest on the GitHub runner
+        if: inputs.resolve_lock == true
+        run: |
+          mkdir -p .ci-output/bun-base
+          docker buildx imagetools inspect oven/bun:1.4.4-alpine --format '{{json .Manifest}}' > .ci-output/bun-base/manifest.json
+          python3 - <<'PYCODE'
+          import json, re
+          from pathlib import Path
+          manifest = json.loads(Path(".ci-output/bun-base/manifest.json").read_text())
+          digest = manifest["digest"]
+          assert re.fullmatch(r"sha256:[a-f0-9]{64}", digest)
+          platforms = {f"{p.get('platform', {}).get('os')}/{p.get('platform', {}).get('architecture')}" for p in manifest["manifests"]}
+          assert {"linux/amd64", "linux/arm64"} <= platforms
+          for filename, artifact in [("Dockerfile", "Dockerfile"), ("deploy/distribution.Dockerfile", "distribution.Dockerfile")]:
+              path = Path(filename)
+              content, count = re.subn(r"oven/bun:1\.4\.4-alpine(?:@sha256:[a-f0-9]{64})?", "oven/bun:1.4.4-alpine@" + digest, path.read_text())
+              assert count > 0, filename
+              path.write_text(content)
+              (Path(".ci-output/bun-base") / artifact).write_text(content)
+          print("Resolved the official Bun multiarchitecture base:", digest)
+          PYCODE
       - name: Check distribution helpers
         run: |
           python3 -m unittest discover -s tests -p 'release_compose_test.py' -v
           python3 -m py_compile scripts/publish-distribution.py scripts/runtime_image.py scripts/check-runtime-image.py
-      - uses: denoland/setup-deno@v2
+      - uses: oven-sh/setup-bun@v2
         with:
-          deno-version: "2.9.8"
-          cache: true
+          bun-version: "1.4.4"
+      - name: Resolve candidate dependencies on the GitHub runner only
+        if: inputs.resolve_lock == true
+        run: bun install
       - name: Install exactly the locked dependencies
-        run: deno install --frozen --allow-scripts=npm:esbuild
+        if: inputs.resolve_lock != true
+        run: |
+          test -f bun.lock
+          bun install --frozen-lockfile
+          git diff --exit-code -- package.json bun.lock
       - name: Check TypeScript
-        run: deno task check
+        run: bun run check
       - name: Test timer and persistence
-        run: deno task test
-      - name: Build static application
-        run: deno task build
-      - name: Prepare an allowlisted distribution with an empty README
+        run: bun run test
+      - name: Build the web interface and bundled Bun API
+        run: bun run build
+      - name: Prepare the allowlisted compiled production artifact
         run: python3 scripts/prepare-distribution.py --version "$DYNTICK_VERSION"
-      - uses: docker/setup-buildx-action@v4
       - uses: docker/setup-qemu-action@v3
         with:
           platforms: arm64
@@ -63,25 +94,25 @@ jobs:
       - name: Verify the source Dockerfile runtime
         run: |
           docker build --target runtime -t dyntick-dev-ci:latest .
-          docker run -d --name dyntick-dev-ci --read-only --tmpfs /tmp:rw,noexec,nosuid,size=16m --cap-drop ALL --security-opt no-new-privileges:true -p 127.0.0.1:18083:8080 dyntick-dev-ci:latest
+          docker run -d --name dyntick-dev-ci --read-only --mount type=volume,source=dyntick-ci-dev,target=/data --tmpfs /tmp:rw,noexec,nosuid,size=16m --cap-drop ALL --security-opt no-new-privileges:true -p 127.0.0.1:18083:8080 dyntick-dev-ci:latest
           curl --fail --silent --show-error --retry 20 --retry-all-errors --retry-delay 1 --retry-max-time 40 http://127.0.0.1:18083/healthz
           python3 scripts/smoke.py http://127.0.0.1:18083
-          test "$(docker exec dyntick-dev-ci id -u)" = 101
-          docker exec dyntick-dev-ci wget -q -O /dev/null http://127.0.0.1:8080/healthz
+          test "$(docker exec dyntick-dev-ci id -u)" = 1000
+          docker exec dyntick-dev-ci bun -e 'if (!(await fetch("http://127.0.0.1:8080/healthz")).ok) process.exit(1)'
       - name: Build and run the arm64 production image
         run: |
           docker buildx build --platform linux/arm64 --load -t dyntick-ci:arm64 .ci-output/distribution
-          docker run --platform linux/arm64 -d --name dyntick-arm64-ci --read-only --tmpfs /tmp:rw,noexec,nosuid,size=16m --cap-drop ALL --security-opt no-new-privileges:true -p 127.0.0.1:18081:8080 dyntick-ci:arm64
+          docker run --platform linux/arm64 -d --name dyntick-arm64-ci --read-only --mount type=volume,source=dyntick-ci-arm64,target=/data --tmpfs /tmp:rw,noexec,nosuid,size=16m --cap-drop ALL --security-opt no-new-privileges:true -p 127.0.0.1:18081:8080 dyntick-ci:arm64
           curl --fail --silent --show-error --retry 20 --retry-all-errors --retry-delay 1 --retry-max-time 40 http://127.0.0.1:18081/healthz
           python3 scripts/smoke.py http://127.0.0.1:18081
-          test "$(docker exec dyntick-arm64-ci id -u)" = 101
-          docker exec dyntick-arm64-ci wget -q -O /dev/null http://127.0.0.1:8080/healthz
+          test "$(docker exec dyntick-arm64-ci id -u)" = 1000
+          docker exec dyntick-arm64-ci bun -e 'if (!(await fetch("http://127.0.0.1:8080/healthz")).ok) process.exit(1)'
       - name: Validate Compose and start production container
         run: |
           docker compose -f compose.yaml -f deploy/compose.ci.yaml config --quiet
           docker compose -f compose.yaml -f deploy/compose.ci.yaml up -d --no-build --pull never --wait --wait-timeout 60
           python3 scripts/smoke.py http://127.0.0.1:18080
-          test "$(docker compose -f compose.yaml -f deploy/compose.ci.yaml exec -T dyntick id -u)" = 101
+          test "$(docker compose -f compose.yaml -f deploy/compose.ci.yaml exec -T dyntick id -u)" = 1000
       - name: Scan the production image with the current vulnerability database
         id: image_scan
         continue-on-error: true
@@ -101,11 +132,35 @@ jobs:
           for image in dyntick-ci:latest dyntick-ci:arm64 dyntick-dev-ci:latest; do
             "$RUNNER_TEMP/trivy/trivy" image --scanners vuln --severity HIGH,CRITICAL --exit-code 1 "$image"
           done
-          docker compose -f compose.yaml -f deploy/compose.ci.yaml exec -T dyntick nginx -T > .ci-output/security/nginx-effective.txt 2>&1
       - name: Install a browser on the GitHub runner only
-        run: deno run -A npm:playwright@1 install --with-deps chromium
+        run: bun run --bun playwright install --with-deps chromium
       - name: Verify real interface and capture desktop/mobile screenshots
-        run: deno task test:browser
+        run: bun run test:browser
+      - name: Verify SQLite survives container recreation on both platforms
+        run: |
+          python3 scripts/persistence-check.py seed http://127.0.0.1:18080 .ci-output/persistence-compose.json
+          docker compose -f compose.yaml -f deploy/compose.ci.yaml up -d --force-recreate --no-build --pull never --wait --wait-timeout 90
+          python3 scripts/persistence-check.py check http://127.0.0.1:18080 .ci-output/persistence-compose.json
+          python3 scripts/persistence-check.py seed http://127.0.0.1:18081 .ci-output/persistence-arm64.json
+          docker stop dyntick-arm64-ci
+          docker rm dyntick-arm64-ci
+          docker run --platform linux/arm64 -d --name dyntick-arm64-ci --read-only --mount type=volume,source=dyntick-ci-arm64,target=/data --tmpfs /tmp:rw,noexec,nosuid,size=16m --cap-drop ALL --security-opt no-new-privileges:true -p 127.0.0.1:18081:8080 dyntick-ci:arm64
+          curl --fail --silent --show-error --retry 20 --retry-all-errors --retry-delay 1 --retry-max-time 40 http://127.0.0.1:18081/healthz
+          python3 scripts/persistence-check.py check http://127.0.0.1:18081 .ci-output/persistence-arm64.json
+      - name: Candidate Bun lockfile
+        if: inputs.resolve_lock == true && always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: bun-lock
+          path: bun.lock
+          if-no-files-found: ignore
+      - name: Candidate pinned runtime Dockerfiles
+        if: inputs.resolve_lock == true && always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: bun-runtime-base
+          path: .ci-output/bun-base/
+          if-no-files-found: ignore
       - name: Browser screenshots
         if: always()
         uses: actions/upload-artifact@v7
@@ -130,8 +185,9 @@ jobs:
         if: always()
         run: |
           docker compose -f compose.yaml -f deploy/compose.ci.yaml logs
-          docker compose -f compose.yaml -f deploy/compose.ci.yaml down --remove-orphans
+          docker compose -f compose.yaml -f deploy/compose.ci.yaml down --remove-orphans --volumes
           docker rm -f dyntick-dev-ci dyntick-arm64-ci || true
+          docker volume rm dyntick-ci-dev dyntick-ci-arm64 || true
       - name: Enforce production image security gate
         if: always() && steps.image_scan.outcome != 'success'
         run: |

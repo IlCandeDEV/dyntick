@@ -1,16 +1,18 @@
-FROM nginx/nginx-unprivileged:stable-alpine-slim@sha256:30b5b66412019e6860fb900420758f664f770082d142b614db0d9afadfede1d3
+FROM oven/bun:1.4.4-alpine
 USER 0
-RUN apk add --no-cache --upgrade 'zlib>=1.4-r0'
+RUN mkdir -p /app/site /data && chown -R 1000:1000 /app /data
+WORKDIR /app
 
 LABEL org.opencontainers.image.title="Dyntick" \
       org.opencontainers.image.source="https://github.com/IlCandeDEV/dyntick" \
       org.opencontainers.image.licenses="PolyForm-Noncommercial-1.0.0" \
       org.opencontainers.image.description="Your personal study space, one thing at a time."
 
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-COPY site/ /usr/share/nginx/html/
-USER 101
+COPY --chown=1000:1000 site/ /app/site/
+COPY --chown=1000:1000 server.js /app/server.js
+ENV DATABASE_PATH=/data/dyntick.sqlite STATIC_DIRECTORY=/app/site PORT=8080
+USER 1000
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD wget -q -O /dev/null http://127.0.0.1:8080/healthz || exit 1
-ENTRYPOINT ["nginx", "-g", "daemon off;"]
+  CMD bun -e 'if (!(await fetch("http://127.0.0.1:8080/healthz")).ok) process.exit(1)'
+ENTRYPOINT ["bun", "--no-install", "/app/server.js"]

@@ -780,3 +780,16 @@ button.activity-cell:active::after { opacity: .45; transform: scale(.9); }
   .main-nav button > span, .settings-footer > button > span, .sound-setting > button > span,
   .astryx-selector-option, button.activity-cell::after { transform: none !important; }
 }
+
+/* Durable state belongs to the homelab; connection feedback stays visible on every page. */
+.sync-status { display: flex; align-items: center; justify-content: flex-end; gap: 12px; min-height: 22px; margin: -8px 0 18px; color: var(--muted); font-size: 11px; line-height: 1.6; }
+.sync-status > span::before { content: ""; display: inline-block; width: 5px; height: 5px; margin: 0 7px 1px 0; border-radius: 50%; background: var(--progress); }
+.sync-status[data-sync-state="offline"], .sync-status[data-sync-state="conflict"] { justify-content: space-between; padding: 12px 15px; border: 1px solid var(--control-border); border-radius: 12px; color: var(--ink); background: var(--accent); font-size: 12px; }
+.sync-status[data-sync-state="offline"] > span::before { background: currentColor; }
+.sync-status > button { flex-shrink: 0; min-height: 36px; padding: 6px 10px; border: 1px solid var(--control-border); border-radius: 8px; color: var(--ink); background: var(--surface); font: inherit; font-weight: 550; }
+.settings-fieldset:disabled { opacity: .7; }
+@media (max-width: 680px) {
+  .sync-status { justify-content: flex-start; margin: -4px 0 14px; }
+  .sync-status[data-sync-state="offline"], .sync-status[data-sync-state="conflict"] { align-items: flex-start; flex-direction: column; gap: 8px; }
+  .sync-status > button { min-height: 44px; }
+}

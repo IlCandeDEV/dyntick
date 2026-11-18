@@ -7,6 +7,8 @@ services:
     restart: unless-stopped
     ports:
       - "${PORT:-8080}:8080"
+    volumes:
+      - dyntick-data:/data
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=16m
@@ -14,3 +16,6 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+
+volumes:
+  dyntick-data:

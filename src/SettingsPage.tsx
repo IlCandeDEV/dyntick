@@ -8,11 +8,12 @@ import { messagesFor } from "./i18n.ts";
 
 interface Props {
   preferences: Preferences;
-  onSave: (preferences: Preferences) => void;
+  onSave: (preferences: Preferences) => Promise<boolean>;
+  disabled?: boolean;
   onPreviewSound: () => Promise<boolean>;
 }
 
-export function SettingsPage({ preferences, onSave, onPreviewSound }: Props) {
+export function SettingsPage({ preferences, onSave, onPreviewSound, disabled = false }: Props) {
   const form = useRef<HTMLFormElement>(null);
   const [sound, setSound] = useState(preferences.soundEnabled);
   const [soundUnavailable, setSoundUnavailable] = useState(false);
@@ -58,7 +59,7 @@ export function SettingsPage({ preferences, onSave, onPreviewSound }: Props) {
           <span className="settings-page-icon" aria-hidden="true"><Icon name="settings" width="24" height="24" /></span>
         </header>
         <form ref={form} onSubmit={submit}>
-          <fieldset className="settings-fieldset">
+          <fieldset className="settings-fieldset" disabled={disabled}>
             <legend>{copy.durationLegend}</legend>
             <p className="settings-description">{copy.durationDescription}</p>
             <div className="duration-fields">
@@ -71,7 +72,7 @@ export function SettingsPage({ preferences, onSave, onPreviewSound }: Props) {
                   <span>{label}</span>
                   <span className="number-field">
                     <input type="number" name={name} min="1" max="180" step="1" required
-                      defaultValue={preferences[name]} inputMode="numeric" />
+                      key={preferences[name]} defaultValue={preferences[name]} inputMode="numeric" />
                     <span aria-hidden="true">min</span>
                   </span>
                 </label>
@@ -81,13 +82,13 @@ export function SettingsPage({ preferences, onSave, onPreviewSound }: Props) {
               <span>{copy.longBreakEvery}</span>
               <span className="number-field">
                 <input type="number" name="longBreakInterval" min="1" max={MAX_CYCLE_SESSIONS} step="1" required
-                  defaultValue={preferences.longBreakInterval} inputMode="numeric" />
+                  key={preferences.longBreakInterval} defaultValue={preferences.longBreakInterval} inputMode="numeric" />
                 <span aria-hidden="true">{copy.sessionsUnit}</span>
               </span>
             </label>
             <p className="field-hint">{copy.durationHint}</p>
           </fieldset>
-          <fieldset className="settings-fieldset">
+          <fieldset className="settings-fieldset" disabled={disabled}>
             <legend>{copy.detailsLegend}</legend>
             <div className="sound-setting">
               <Switch label={copy.soundLabel} value={sound} onChange={setSound}
@@ -110,8 +111,8 @@ export function SettingsPage({ preferences, onSave, onPreviewSound }: Props) {
             </label>
           </fieldset>
           <footer className="settings-footer">
-            <Button label={copy.restoreDefaults} variant="ghost" onClick={restoreDefaults} />
-            <Button label={copy.savePreferences} type="submit" variant="primary" className="save-button" />
+            <Button label={copy.restoreDefaults} variant="ghost" onClick={restoreDefaults} isDisabled={disabled} />
+            <Button label={copy.savePreferences} type="submit" variant="primary" className="save-button" isDisabled={disabled} />
           </footer>
         </form>
         <section className="keyboard-tips" aria-labelledby="keyboard-tips-title" data-testid="keyboard-tips">

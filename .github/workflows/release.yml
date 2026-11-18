@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Distribution version, for example 1.5.0
+        description: Distribution version, for example 2.0.0
         required: true
-        default: "1.5.0"
+        default: "2.0.0"
         type: string
 
 permissions:

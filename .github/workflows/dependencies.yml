@@ -1,4 +1,4 @@
-name: Resolve Deno dependencies
+name: Resolve Bun dependencies
 
 on:
   workflow_dispatch:
@@ -7,32 +7,8 @@ permissions:
   contents: read
 
 jobs:
-  resolve:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v7
-      - uses: denoland/setup-deno@v2
-        with:
-          deno-version: "2.9.8"
-      - name: Resolve dependencies and create lockfile on the runner
-        run: deno install --frozen=false --allow-scripts=npm:esbuild
-      - name: Check TypeScript
-        run: deno task check
-      - name: Test timer and persistence
-        run: deno task test
-      - name: Build the application
-        run: deno task build
-      - name: Downloadable lockfile
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: deno-lock
-          path: deno.lock
-          if-no-files-found: error
-      - name: Downloadable application build
-        uses: actions/upload-artifact@v7
-        with:
-          name: site-build
-          path: dist/
-          if-no-files-found: error
+  verify:
+    uses: ./.github/workflows/ci.yml
+    with:
+      version: "2.0.0"
+      resolve_lock: true

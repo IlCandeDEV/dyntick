@@ -1,0 +1,6 @@
+[install]
+# Runtime artifacts contain no npm packages and must never download dependencies.
+auto = "disable"
+
+[test]
+root = "./tests"

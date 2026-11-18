@@ -1,0 +1,33 @@
+{
+  "name": "dyntick",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "packageManager": "bun@1.4.4",
+  "engines": { "bun": "1.4.4" },
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "bun test tests",
+    "build": "bun run scripts/build.ts",
+    "start": "bun --no-install build/server.js",
+    "test:browser": "bun run scripts/browser-check.ts"
+  },
+  "dependencies": {
+    "@astryxdesign/core": "0.7.13",
+    "@astryxdesign/theme-neutral": "0.7.13",
+    "@fontsource-variable/ibm-plex-sans": "5.3.0",
+    "@stylexjs/stylex": "0.19.1",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.4",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "playwright": "1.65.0",
+    "typescript": "5.9.3",
+    "vite": "7.3.8"
+  },
+  "trustedDependencies": ["esbuild"]
+}

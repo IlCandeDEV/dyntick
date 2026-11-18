@@ -1,0 +1,35 @@
+name: dyntick-preview
+
+services:
+  dyntick:
+    image: dyntick-preview:2.0.0
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "127.0.0.1:18083:8080"
+    restart: "no"
+    volumes:
+      - dyntick-preview-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  checks:
+    profiles: ["checks"]
+    image: dyntick-preview-check:2.0.0
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: build
+    volumes:
+      - ./tests:/app/tests:ro
+      - ./scripts:/app/scripts:ro
+    command: ["sh", "-c", "bun run check && bun run test"]
+
+volumes:
+  dyntick-preview-data:

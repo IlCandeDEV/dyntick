@@ -78,7 +78,18 @@ export function parseTimer(raw: string | null, preferences: Preferences, now: nu
         value.focusSessionId.length > 0 && value.focusSessionId.length <= 128
       ? value.focusSessionId
       : null;
-    return settleTimer({ ...value, focusSessionId, lastFocusCompletion } as unknown as TimerState, now);
+    return settleTimer({
+      version: 1,
+      mode: value.mode as TimerState["mode"],
+      status: value.status as TimerState["status"],
+      durationMs: value.durationMs,
+      remainingMs: value.remainingMs,
+      endAt: value.endAt as number | null,
+      completedFocuses: value.completedFocuses,
+      completionId: value.completionId,
+      focusSessionId,
+      lastFocusCompletion,
+    }, now);
   } catch {
     return fallback();
   }

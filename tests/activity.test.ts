@@ -1,3 +1,4 @@
+import { test } from "bun:test";
 import { deepEqual, equal, notEqual, strictEqual } from "node:assert/strict";
 import {
   ACTIVITY_KEY, activityDays, emptyActivity, mergeActivity, parseActivity,
@@ -14,7 +15,7 @@ const start = new Date(2026, 10, 12, 23, 30).getTime();
 const completion = (id: string, completedAt = start, minutes = 25): FocusCompletion =>
   ({ id, completedAt, minutes });
 
-Deno.test("activity parsing recovers damaged data and validates each completion independently", () => {
+test("activity parsing recovers damaged data and validates each completion independently", () => {
   for (const raw of [null, "broken", "null", "[]", "{}", '{"version":2,"entries":{}}']) {
     deepEqual(parseActivity(raw), emptyActivity());
   }
@@ -31,7 +32,7 @@ Deno.test("activity parsing recovers damaged data and validates each completion 
   deepEqual(parsed.entries, { valid: completion("valid") });
 });
 
-Deno.test("untrusted object-property IDs remain ordinary entries and cannot mutate prototypes", () => {
+test("untrusted object-property IDs remain ordinary entries and cannot mutate prototypes", () => {
   const raw = '{"version":1,"entries":{"__proto__":{"id":"__proto__","completedAt":0,"minutes":1},"constructor":{"id":"constructor","completedAt":0,"minutes":1}}}';
   const parsed = parseActivity(raw);
   const merged = mergeActivity(emptyActivity(), parsed);
@@ -42,7 +43,7 @@ Deno.test("untrusted object-property IDs remain ordinary entries and cannot muta
     Object.values(activityDays(merged))[0].sessions, 2);
 });
 
-Deno.test("concurrent sessions finishing together merge by ID rather than timestamp", () => {
+test("concurrent sessions finishing together merge by ID rather than timestamp", () => {
   const first = recordCompletion(emptyActivity(), completion("tab-a"));
   const second = recordCompletion(emptyActivity(), completion("tab-b"));
   const union = mergeActivity(first, second);
@@ -53,7 +54,7 @@ Deno.test("concurrent sessions finishing together merge by ID rather than timest
   equal(serializeActivity(union), serializeActivity(mergeActivity(second, first)));
 });
 
-Deno.test("conflicting duplicate IDs converge to the same value without storage ping-pong", () => {
+test("conflicting duplicate IDs converge to the same value without storage ping-pong", () => {
   const first = recordCompletion(emptyActivity(), completion("same", start, 25));
   const second = recordCompletion(emptyActivity(), completion("same", start + 1000, 30));
   const a = mergeActivity(first, second);
@@ -63,7 +64,7 @@ Deno.test("conflicting duplicate IDs converge to the same value without storage 
   equal(a.entries.same.completedAt, start);
 });
 
-Deno.test("a persisted session ID makes updater replays and background recovery idempotent", () => {
+test("a persisted session ID makes updater replays and background recovery idempotent", () => {
   const running = startTimer(createTimer(preferences), preferences, start);
   equal(typeof running.focusSessionId, "string");
   const first = settleTimer(running, running.endAt!);
@@ -79,7 +80,7 @@ Deno.test("a persisted session ID makes updater replays and background recovery 
   equal(days["2026-11-19"], undefined);
 });
 
-Deno.test("pause and resume preserve focus identity and credit only the configured study duration", () => {
+test("pause and resume preserve focus identity and credit only the configured study duration", () => {
   const running = startTimer(createTimer(preferences), preferences, start);
   const paused = pauseTimer(running, start + 10_000);
   const resumed = startTimer(paused, preferences, start + 86_400_000);
@@ -90,7 +91,7 @@ Deno.test("pause and resume preserve focus identity and credit only the configur
   equal(finished.lastFocusCompletion!.completedAt, resumed.endAt);
 });
 
-Deno.test("cancelling and breaks earn no activity; repeating a completed focus creates a new session", () => {
+test("cancelling and breaks earn no activity; repeating a completed focus creates a new session", () => {
   const running = startTimer(createTimer(preferences), preferences, start);
   const cancelled = resetTimer(running, preferences);
   equal(cancelled.lastFocusCompletion, null);
@@ -110,7 +111,7 @@ Deno.test("cancelling and breaks earn no activity; repeating a completed focus c
   equal(Object.keys(activity.entries).length, 2);
 });
 
-Deno.test("legacy expired timers recover a stable completion, and completed timers survive refresh", () => {
+test("legacy expired timers recover a stable completion, and completed timers survive refresh", () => {
   const running = startTimer(createTimer(preferences), preferences, start);
   const legacy = JSON.parse(JSON.stringify(running));
   delete legacy.focusSessionId;
@@ -127,7 +128,7 @@ Deno.test("legacy expired timers recover a stable completion, and completed time
   equal(Object.keys(activity.entries).length, 1);
 });
 
-Deno.test("read-before-write plus event payloads recover overwritten concurrent storage writes", () => {
+test("read-before-write plus event payloads recover overwritten concurrent storage writes", () => {
   const a = recordCompletion(emptyActivity(), completion("tab-a"));
   const b = recordCompletion(emptyActivity(), completion("tab-b"));
   let raw = serializeActivity(b); // B overwrote A before A's storage event was handled.
@@ -148,7 +149,7 @@ Deno.test("read-before-write plus event payloads recover overwritten concurrent 
   equal(writes, 1);
 });
 
-Deno.test("unavailable activity storage preserves in-memory completions and can retry later", () => {
+test("unavailable activity storage preserves in-memory completions and can retry later", () => {
   const activity = recordCompletion(emptyActivity(), completion("retry"));
   for (const storage of [null, {
     getItem() { throw new Error("blocked"); },

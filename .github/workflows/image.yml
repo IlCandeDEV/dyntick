@@ -13,7 +13,7 @@ on:
       version:
         description: Stable runtime version
         type: string
-        default: "1.5.0"
+        default: "2.0.0"
         required: true
       ci_run:
         description: Successful production verification run
@@ -46,7 +46,7 @@ jobs:
   publish:
     if: inputs.operation == 'publish' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       - name: Download and audit the exact successful CI artifact
@@ -92,15 +92,22 @@ jobs:
             platform_digest=$(python3 scripts/runtime_image.py platform --version "$VERSION" --digest "$DIGEST" --architecture "$architecture")
             platform_image="$IMAGE@$platform_digest"
             docker pull --platform "linux/$architecture" "$platform_image"
-            docker run --platform "linux/$architecture" -d --name "dyntick-registry-$architecture" --read-only --tmpfs /tmp:rw,noexec,nosuid,size=16m --cap-drop ALL --security-opt no-new-privileges:true -p 127.0.0.1:18084:8080 "$platform_image"
+            docker run --platform "linux/$architecture" -d --name "dyntick-registry-$architecture" --read-only --mount "type=volume,source=dyntick-registry-$architecture,target=/data" --tmpfs /tmp:rw,noexec,nosuid,size=16m --cap-drop ALL --security-opt no-new-privileges:true -p 127.0.0.1:18084:8080 "$platform_image"
             curl --fail --silent --show-error --retry 20 --retry-all-errors --retry-delay 1 --retry-max-time 40 http://127.0.0.1:18084/healthz
             python3 scripts/smoke.py http://127.0.0.1:18084
-            test "$(docker exec "dyntick-registry-$architecture" id -u)" = 101
-            docker exec "dyntick-registry-$architecture" wget -q -O /dev/null http://127.0.0.1:8080/healthz
+            test "$(docker exec "dyntick-registry-$architecture" id -u)" = 1000
+            docker exec "dyntick-registry-$architecture" bun -e 'if (!(await fetch("http://127.0.0.1:8080/healthz")).ok) process.exit(1)'
             python3 scripts/check-runtime-image.py "$platform_image" "dyntick-registry-$architecture" "$architecture" .ci-output/runtime-distribution
             "$RUNNER_TEMP/trivy/trivy" image --scanners vuln --format json --output ".ci-output/runtime-image-security/$architecture.json" "$platform_image"
             "$RUNNER_TEMP/trivy/trivy" image --scanners vuln --severity HIGH,CRITICAL --exit-code 1 "$platform_image"
+            python3 scripts/persistence-check.py seed http://127.0.0.1:18084 ".ci-output/runtime-image-security/persistence-$architecture.json"
+            docker stop "dyntick-registry-$architecture"
+            docker rm "dyntick-registry-$architecture"
+            docker run --platform "linux/$architecture" -d --name "dyntick-registry-$architecture" --read-only --mount "type=volume,source=dyntick-registry-$architecture,target=/data" --tmpfs /tmp:rw,noexec,nosuid,size=16m --cap-drop ALL --security-opt no-new-privileges:true -p 127.0.0.1:18084:8080 "$platform_image"
+            curl --fail --silent --show-error --retry 20 --retry-all-errors --retry-delay 1 --retry-max-time 40 http://127.0.0.1:18084/healthz
+            python3 scripts/persistence-check.py check http://127.0.0.1:18084 ".ci-output/runtime-image-security/persistence-$architecture.json"
             docker rm -f "dyntick-registry-$architecture"
+            docker volume rm "dyntick-registry-$architecture"
           done
       - name: Attest the image's public source and build origin
         uses: actions/attest@v4
@@ -129,7 +136,9 @@ jobs:
           if-no-files-found: ignore
       - name: Stop any remaining verification containers
         if: always()
-        run: docker rm -f dyntick-registry-amd64 dyntick-registry-arm64 || true
+        run: |
+          docker rm -f dyntick-registry-amd64 dyntick-registry-arm64 || true
+          docker volume rm dyntick-registry-amd64 dyntick-registry-arm64 || true
 
   latest:
     if: inputs.operation == 'latest' && github.ref == 'refs/heads/main'

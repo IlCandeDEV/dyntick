@@ -1,3 +1,13 @@
+# Dyntick 2.0.0
+
+- A major migration from Deno and static Nginx hosting to Bun 1.4.4, with a bundled TypeScript API and built-in SQLite persistence.
+- One shared timer, study history and set of preferences across devices connected to the same personal homelab, with no accounts.
+- A persistent `dyntick-data` Docker volume at `/data`; existing 1.x installations must replace their Compose or add the volume before upgrading the image.
+- Automatic import of legacy browser data: the first browser contributes its timer and preferences, while later browsers merge completed study activity without replacing live server state. Original browser data remains as a backup.
+- Server-owned deadlines, atomic completion records and idempotent requests preserve sessions across refreshes and container restarts without duplicate activity or unattended future intervals.
+- Connection and saving feedback in English, Italian, German and Spanish, with disabled offline actions, safe reconnect retries and explicit handling of concurrent device changes.
+- Ready-to-run public AMD64 and ARM64 images, versioned Compose downloads and signed provenance built from the exact verified production artifact.
+
 # Dyntick 1.5.0
 
 - Ready-to-run public container images for AMD64 and ARM64, built and security-checked on GitHub runners.

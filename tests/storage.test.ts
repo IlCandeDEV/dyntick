@@ -1,3 +1,4 @@
+import { test } from "bun:test";
 import { deepEqual, equal } from "node:assert/strict";
 import {
   parsePreferences, parseTimer, PREFERENCES_KEY, readStorage, type StorageLike,
@@ -13,14 +14,14 @@ function memoryStorage(): StorageLike {
   return { getItem: (key) => data.get(key) ?? null, setItem: (key, value) => { data.set(key, value); } };
 }
 
-Deno.test("valid preferences round-trip through browser storage", () => {
+test("valid preferences round-trip through browser storage", () => {
   const storage = memoryStorage();
   const custom = { ...preferences, focusMinutes: 45, theme: "dark" as const, soundEnabled: false };
   equal(writeStorage(storage, PREFERENCES_KEY, custom), true);
   deepEqual(parsePreferences(readStorage(storage, PREFERENCES_KEY)), custom);
 });
 
-Deno.test("invalid or missing preferences recover safely with field-level defaults", () => {
+test("invalid or missing preferences recover safely with field-level defaults", () => {
   for (const raw of [null, "not json", "null", "[]", "17"]) deepEqual(parsePreferences(raw), preferences);
   const result = parsePreferences(JSON.stringify({
     focusMinutes: 0, shortBreakMinutes: 8, longBreakMinutes: 181,
@@ -29,7 +30,7 @@ Deno.test("invalid or missing preferences recover safely with field-level defaul
   deepEqual(result, { ...preferences, shortBreakMinutes: 8 });
 });
 
-Deno.test("cycles allow up to six sessions and migrate larger saved values without losing other preferences", () => {
+test("cycles allow up to six sessions and migrate larger saved values without losing other preferences", () => {
   const custom = { ...preferences, focusMinutes: 45, language: "it" as const, theme: "dark" as const, soundEnabled: false };
   for (const count of [1, 4, 6, 7, 12]) {
     deepEqual(parsePreferences(JSON.stringify({ ...custom, longBreakInterval: count })), {
@@ -38,7 +39,7 @@ Deno.test("cycles allow up to six sessions and migrate larger saved values witho
   }
 });
 
-Deno.test("a running timer survives refresh using its original absolute deadline", () => {
+test("a running timer survives refresh using its original absolute deadline", () => {
   const running = startTimer(createTimer(preferences), preferences, now);
   const recovered = parseTimer(JSON.stringify(running), preferences, now + 120_000);
   equal(recovered.endAt, running.endAt);
@@ -46,7 +47,7 @@ Deno.test("a running timer survives refresh using its original absolute deadline
   equal(recovered.status, "running");
 });
 
-Deno.test("refresh after expiry credits exactly one phase and repeated refreshes do not add more", () => {
+test("refresh after expiry credits exactly one phase and repeated refreshes do not add more", () => {
   const running = startTimer(createTimer(preferences), preferences, now);
   const recovered = parseTimer(JSON.stringify(running), preferences, now + 86_400_000);
   equal(recovered.status, "completed");
@@ -54,13 +55,13 @@ Deno.test("refresh after expiry credits exactly one phase and repeated refreshes
   deepEqual(parseTimer(JSON.stringify(recovered), preferences, now + 2 * 86_400_000), recovered);
 });
 
-Deno.test("paused timers stay paused after reload regardless of elapsed wall-clock time", () => {
+test("paused timers stay paused after reload regardless of elapsed wall-clock time", () => {
   const paused = pauseTimer(startTimer(createTimer(preferences), preferences, now), now + 30_000);
   const recovered = parseTimer(JSON.stringify(paused), preferences, now + 86_400_000);
   deepEqual(recovered, paused);
 });
 
-Deno.test("invalid stored timer shapes cannot start an unexpected session", () => {
+test("invalid stored timer shapes cannot start an unexpected session", () => {
   const valid = createTimer(preferences);
   const changes = [
     { version: 99 }, { mode: "unknown" }, { status: "unknown" }, { durationMs: 0 },
@@ -78,7 +79,7 @@ Deno.test("invalid stored timer shapes cannot start an unexpected session", () =
   }
 });
 
-Deno.test("each tab can persist its own session without altering shared preferences", () => {
+test("legacy per-tab session data can be read without altering shared preferences", () => {
   const tabA = memoryStorage();
   const tabB = memoryStorage();
   const local = memoryStorage();
@@ -90,7 +91,7 @@ Deno.test("each tab can persist its own session without altering shared preferen
   deepEqual(parsePreferences(readStorage(local, PREFERENCES_KEY)), preferences);
 });
 
-Deno.test("blocked storage and exhausted quotas do not throw", () => {
+test("blocked storage and exhausted quotas do not throw", () => {
   const blocked: StorageLike = {
     getItem() { throw new Error("Storage disabled"); },
     setItem() { throw new Error("Quota exceeded"); },
@@ -101,7 +102,7 @@ Deno.test("blocked storage and exhausted quotas do not throw", () => {
   equal(writeStorage(null, PREFERENCES_KEY, preferences), false);
 });
 
-Deno.test("English is the default for new, legacy, or invalid language preferences", () => {
+test("English is the default for new, legacy, or invalid language preferences", () => {
   equal(parsePreferences(null).language, "en");
   equal(parsePreferences(JSON.stringify({ focusMinutes: 45, theme: "dark" })).language, "en");
   equal(parsePreferences(JSON.stringify({ language: "fr" })).language, "en");
@@ -110,7 +111,7 @@ Deno.test("English is the default for new, legacy, or invalid language preferenc
   equal(legacy.soundEnabled, false);
 });
 
-for (const language of LANGUAGES) Deno.test(`${language} persists while preserving the running and paused timer`, () => {
+for (const language of LANGUAGES) test(`${language} persists while preserving the running and paused timer`, () => {
   const storage = memoryStorage();
   const running = startTimer(createTimer(preferences), preferences, now);
   const localized = { ...preferences, language };

@@ -1,3 +1,4 @@
+import { test } from "bun:test";
 import { deepEqual, equal, strictEqual } from "node:assert/strict";
 import {
   createTimer, DEFAULT_PREFERENCES, durationFor, formatTime, nextMode, pauseTimer,
@@ -7,7 +8,7 @@ import {
 const preferences = { ...DEFAULT_PREFERENCES };
 const start = 1_800_000_000_000;
 
-Deno.test("an idle timer starts with the configured duration and one fixed deadline", () => {
+test("an idle timer starts with the configured duration and one fixed deadline", () => {
   const timer = startTimer(createTimer(preferences), preferences, start);
   equal(timer.status, "running");
   equal(timer.endAt, start + 25 * 60_000);
@@ -15,7 +16,7 @@ Deno.test("an idle timer starts with the configured duration and one fixed deadl
   strictEqual(startTimer(timer, preferences, start + 2000), timer);
 });
 
-Deno.test("pause freezes the exact remainder and resume excludes all paused time", () => {
+test("pause freezes the exact remainder and resume excludes all paused time", () => {
   const running = startTimer(createTimer(preferences), preferences, start);
   const paused = pauseTimer(running, start + 72_345);
   equal(paused.remainingMs, 25 * 60_000 - 72_345);
@@ -25,12 +26,12 @@ Deno.test("pause freezes the exact remainder and resume excludes all paused time
   equal(resumed.endAt, start + 86_400_000 + paused.remainingMs);
 });
 
-Deno.test("reset stops a running phase and restores its full configured duration", () => {
+test("reset stops a running phase and restores its full configured duration", () => {
   const running = startTimer(createTimer(preferences), preferences, start);
   deepEqual(resetTimer(running, preferences), createTimer(preferences));
 });
 
-Deno.test("a suspended tab finishes only the actual phase, even days later", () => {
+test("a suspended tab finishes only the actual phase, even days later", () => {
   const running = startTimer(createTimer(preferences), preferences, start);
   const finished = settleTimer(running, start + 7 * 86_400_000);
   equal(finished.status, "completed");
@@ -41,7 +42,7 @@ Deno.test("a suspended tab finishes only the actual phase, even days later", () 
   strictEqual(settleTimer(finished, start + 8 * 86_400_000), finished);
 });
 
-Deno.test("repeated checks at the deadline never credit the same session twice", () => {
+test("repeated checks at the deadline never credit the same session twice", () => {
   const running = startTimer(createTimer(preferences), preferences, start);
   const deadline = running.endAt!;
   strictEqual(settleTimer(running, deadline - 1), running);
@@ -51,21 +52,21 @@ Deno.test("repeated checks at the deadline never credit the same session twice",
   equal(timer.completionId, 1);
 });
 
-Deno.test("a late pause completes the phase, rather than creating a zero-duration pause", () => {
+test("a late pause completes the phase, rather than creating a zero-duration pause", () => {
   const running = startTimer(createTimer(preferences), preferences, start);
   const pausedLate = pauseTimer(running, running.endAt! + 1000);
   equal(pausedLate.status, "completed");
   equal(pausedLate.completedFocuses, 1);
 });
 
-Deno.test("a late start on a running timer finishes it without starting a second phase", () => {
+test("a late start on a running timer finishes it without starting a second phase", () => {
   const running = startTimer(createTimer(preferences), preferences, start);
   const result = startTimer(running, preferences, running.endAt! + 1000);
   equal(result.mode, "focus");
   equal(result.status, "completed");
 });
 
-Deno.test("the next phase only starts on an explicit action", () => {
+test("the next phase only starts on an explicit action", () => {
   const running = startTimer(createTimer(preferences), preferences, start);
   const finished = settleTimer(running, running.endAt!);
   equal(nextMode(finished, preferences), "shortBreak");
@@ -75,7 +76,7 @@ Deno.test("the next phase only starts on an explicit action", () => {
   equal(next.endAt, start + 2_000_000 + 5 * 60_000);
 });
 
-Deno.test("four completed focuses lead to a long break, then a fresh cycle", () => {
+test("four completed focuses lead to a long break, then a fresh cycle", () => {
   let timer = createTimer(preferences);
   let now = start;
   for (let index = 0; index < 4; index++) {
@@ -98,7 +99,7 @@ Deno.test("four completed focuses lead to a long break, then a fresh cycle", () 
   equal(sessionNumber(timer, preferences), 1);
 });
 
-Deno.test("a custom long-break interval of one works from the first session", () => {
+test("a custom long-break interval of one works from the first session", () => {
   const custom = { ...preferences, longBreakInterval: 1, longBreakMinutes: 20 };
   const running = startTimer(createTimer(custom), custom, start);
   const finished = settleTimer(running, running.endAt!);
@@ -106,7 +107,7 @@ Deno.test("a custom long-break interval of one works from the first session", ()
   equal(startTimer(finished, custom, start + 2_000_000).durationMs, 20 * 60_000);
 });
 
-Deno.test("switching modes never credits a focus and is blocked while running", () => {
+test("switching modes never credits a focus and is blocked while running", () => {
   const idle = createTimer(preferences);
   const pause = selectMode(idle, "shortBreak", preferences);
   equal(pause.completedFocuses, 0);
@@ -115,7 +116,7 @@ Deno.test("switching modes never credits a focus and is blocked while running", 
   strictEqual(selectMode(running, "longBreak", preferences), running);
 });
 
-Deno.test("resetting a completed focus repeats that same session without double credit", () => {
+test("resetting a completed focus repeats that same session without double credit", () => {
   const running = startTimer(createTimer(preferences), preferences, start);
   const finished = settleTimer(running, running.endAt!);
   const reset = resetTimer(finished, preferences);
@@ -124,7 +125,7 @@ Deno.test("resetting a completed focus repeats that same session without double 
   equal(sessionNumber(reset, preferences), 1);
 });
 
-Deno.test("changing preferences preserves an active or paused phase and applies on reset", () => {
+test("changing preferences preserves an active or paused phase and applies on reset", () => {
   const changed = { ...preferences, focusMinutes: 40 };
   const running = startTimer(createTimer(preferences), preferences, start);
   strictEqual(updateDurations(running, changed), running);
@@ -134,7 +135,7 @@ Deno.test("changing preferences preserves an active or paused phase and applies 
   equal(updateDurations(createTimer(preferences), changed).durationMs, 40 * 60_000);
 });
 
-Deno.test("a future phase uses the newly configured durations", () => {
+test("a future phase uses the newly configured durations", () => {
   const changed = { ...preferences, shortBreakMinutes: 8 };
   const running = startTimer(createTimer(preferences), preferences, start);
   const finished = settleTimer(running, running.endAt!);
@@ -142,7 +143,7 @@ Deno.test("a future phase uses the newly configured durations", () => {
   equal(durationFor("longBreak", changed), 15 * 60_000);
 });
 
-Deno.test("shortening the cycle preserves the running deadline and offers a long break next", () => {
+test("shortening the cycle preserves the running deadline and offers a long break next", () => {
   const fourth = startTimer(createTimer(preferences, "focus", 3), preferences, start);
   const changed = { ...preferences, longBreakInterval: 2 };
   const updated = updateDurations(fourth, changed);
@@ -153,7 +154,7 @@ Deno.test("shortening the cycle preserves the running deadline and offers a long
   equal(nextMode(finished, changed), "longBreak");
 });
 
-Deno.test("display rounds upwards, never goes negative, and supports durations over an hour", () => {
+test("display rounds upwards, never goes negative, and supports durations over an hour", () => {
   equal(formatTime(25 * 60_000), "25:00");
   equal(formatTime(59_001), "01:00");
   equal(formatTime(1), "00:01");

@@ -60,7 +60,7 @@ function TimerFace({ progress, time, label, running, completed }: {
 
 export function App() {
   const pomodoro = usePomodoro();
-  const { timer, preferences, now, savePreferences, primaryAction, reset } = pomodoro;
+  const { timer, preferences, now, savePreferences, primaryAction, reset, controlsDisabled } = pomodoro;
   const [activePage, setActivePage] = useState<StudyPage>(pageFromHash);
   const [notice, setNotice] = useState<"preferencesSaved" | null>(null);
   const copy = messagesFor(preferences.language);
@@ -171,7 +171,7 @@ export function App() {
 
   return (
     <Theme theme={neutralTheme} mode={preferences.theme}>
-      <div className="app-shell" data-mode={timer.mode} data-page={activePage}>
+      <div className="app-shell" data-mode={timer.mode} data-page={activePage} data-state-ready={pomodoro.ready}>
         <a className="skip-link" href="#pomodoro" onClick={(event) => {
           event.preventDefault();
           selectPage("pomodoro");
@@ -206,10 +206,10 @@ export function App() {
               ))}
             </nav>
             <div className="topbar-actions">
-              <LanguagePicker language={preferences.language} label={copy.languageSelector}
+              <LanguagePicker language={preferences.language} label={copy.languageSelector} disabled={controlsDisabled}
                 onChange={(language) => savePreferences({ ...preferences, language })} />
               <Button label={isDark ? copy.lightTheme : copy.darkTheme} variant="ghost"
-                isIconOnly icon={<Icon name={isDark ? "sun" : "moon"} />} className="icon-button"
+                isIconOnly icon={<Icon name={isDark ? "sun" : "moon"} />} className="icon-button" isDisabled={controlsDisabled}
                 onClick={() => savePreferences({ ...preferences, theme: isDark ? "light" : "dark" })} />
             </div>
           </header>
@@ -223,6 +223,13 @@ export function App() {
               <p className="heading-date">{date}</p>
             </header>
 
+            <div className="sync-status" role="status" data-testid="sync-status"
+              data-sync-state={pomodoro.connection === "offline" ? "offline" : !pomodoro.ready ? "loading" : pomodoro.busy ? "saving" : pomodoro.conflict ? "conflict" : "saved"}>
+              <span>{pomodoro.connection === "offline" ? copy.syncOffline : !pomodoro.ready ? copy.syncLoading
+                : pomodoro.busy ? copy.syncSaving : pomodoro.conflict ? copy.syncConflict : copy.syncSaved}</span>
+              {pomodoro.connection === "offline" && <button type="button" onClick={() => { void pomodoro.retry(); }} disabled={pomodoro.busy}>{copy.syncRetry}</button>}
+            </div>
+
             <StudyPages active={activePage} pages={{
               pomodoro: <div className="focus-layout">
               <section className="timer-panel" aria-label={copy.pomodoroTimer}>
@@ -230,14 +237,14 @@ export function App() {
                   <div className={`status-pill ${isRunning ? "is-running" : ""}`} role="status"><span />{status}</div>
                   <Button label={preferences.soundEnabled ? copy.muteSound : copy.enableSound}
                     variant="ghost" isIconOnly icon={<Icon name={preferences.soundEnabled ? "sound" : "muted"} />}
-                    className="icon-button sound-button" aria-pressed={preferences.soundEnabled}
+                    className="icon-button sound-button" aria-pressed={preferences.soundEnabled} isDisabled={controlsDisabled}
                     onClick={() => savePreferences({ ...preferences, soundEnabled: !preferences.soundEnabled })} />
                 </div>
                 <div className="timer-panel-top">
                   <div className="mode-selector" role="group" aria-label={copy.timerModes}>
                     {MODES.map((mode) => (
                       <button key={mode} type="button" aria-pressed={timer.mode === mode}
-                        disabled={isRunning && timer.mode !== mode}
+                        disabled={controlsDisabled || (isRunning && timer.mode !== mode)}
                         title={isRunning && timer.mode !== mode ? copy.pauseToChangeMode : undefined}
                         onClick={() => pomodoro.changeMode(mode)}>{copy.modeLabels[mode]}</button>
                     ))}
@@ -246,11 +253,11 @@ export function App() {
                 <TimerFace progress={progress} time={time} label={completed ? copy.completed : copy.modeLabels[timer.mode]}
                   running={isRunning} completed={completed} />
                 <div className="timer-actions">
-                  <Button label={primaryLabel} variant="primary" size="lg" className="primary-action"
+                  <Button label={primaryLabel} variant="primary" size="lg" className="primary-action" isDisabled={controlsDisabled}
                     icon={<Icon name={isRunning ? "pause" : completed ? "arrow" : "play"} width="19" height="19" />}
                     onClick={primaryAction} />
                   <Button label={copy.reset} variant="secondary" size="lg" isIconOnly
-                    icon={<Icon name="reset" />} className="reset-action" onClick={reset} />
+                    icon={<Icon name="reset" />} className="reset-action" onClick={reset} isDisabled={controlsDisabled} />
                 </div>
               </section>
 
@@ -268,12 +275,11 @@ export function App() {
               </aside>
               </div>,
               activity: <ActivityHistory activity={pomodoro.activity} now={now} copy={copy} />,
-              settings: <SettingsPage preferences={preferences}
-                onSave={(nextPreferences) => { savePreferences(nextPreferences); setNotice("preferencesSaved"); }}
+              settings: <SettingsPage preferences={preferences} disabled={controlsDisabled}
+                onSave={async (nextPreferences) => { const saved = await savePreferences(nextPreferences); if (saved) setNotice("preferencesSaved"); return saved; }}
                 onPreviewSound={pomodoro.previewSound} />,
             }} />
 
-            {!pomodoro.storageAvailable && <p className="storage-notice" role="status">{copy.storageNotice}</p>}
             <footer className="site-footer">
               <span>{copy.studentFooter}</span>
               <a href="https://github.com/IlCandeDEV/dyntick" target="_blank" rel="noopener noreferrer">

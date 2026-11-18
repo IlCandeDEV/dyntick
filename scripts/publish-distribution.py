@@ -46,9 +46,9 @@ def release_caption(version, changelog):
 
 
 def audited_files(stage):
-    if {p.name for p in stage.iterdir()} != {"Dockerfile", "README.md", "compose.yaml", "nginx.conf", "site"}:
+    if {p.name for p in stage.iterdir()} != {"Dockerfile", "README.md", "compose.yaml", "server.js", "site"}:
         raise ValueError("Unexpected runtime distribution files")
-    if (stage / "README.md").read_bytes() or not (stage / "site/index.html").is_file():
+    if (stage / "README.md").read_bytes() or not (stage / "site/index.html").is_file() or not (stage / "server.js").is_file():
         raise ValueError("Expected an empty build-context README and a compiled site")
     files = {}
     for path in sorted(stage.rglob("*")):
@@ -66,8 +66,9 @@ def audited_files(stage):
     compose = files["compose.yaml"].decode()
     placeholder = "$" + "{DYNTICK_VERSION:-latest}"
     if (compose.count(placeholder) != 1 or f"image: {IMAGE}:{placeholder}" not in compose or
-            re.search(r"^\s*build:", compose, re.M) or "pull_policy: always" not in compose):
-        raise ValueError("Compose must pull the prebuilt latest image without a build")
+            re.search(r"^\s*build:", compose, re.M) or "pull_policy: always" not in compose or
+            "dyntick-data:/data" not in compose):
+        raise ValueError("Compose must pull the prebuilt latest image with a persistent SQLite volume")
     return files
 
 

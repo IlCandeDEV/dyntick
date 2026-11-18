@@ -23,12 +23,12 @@ class ReleaseComposeTest(unittest.TestCase):
         source_base = [line for line in source.splitlines() if line.startswith("FROM ")][-1].split(" AS ")[0][5:]
         distribution_base = distribution.splitlines()[0][5:]
         self.assertEqual(source_base, distribution_base)
-        self.assertEqual([line for line in source.splitlines() if line.startswith("RUN apk ")],
-                         [line for line in distribution.splitlines() if line.startswith("RUN apk ")])
-        self.assertRegex(source_base, r"^nginx/nginx-unprivileged:[\w.-]+@sha256:[0-9a-f]{64}$")
+        self.assertRegex(source_base, r"^oven/bun:1\.4\.4-alpine@sha256:[0-9a-f]{64}$")
         for dockerfile in [source, distribution]:
-            self.assertIn("USER 101", dockerfile)
+            self.assertIn("USER 1000", dockerfile)
             self.assertIn("http://127.0.0.1:8080/healthz", dockerfile)
+            self.assertIn("DATABASE_PATH=/data/dyntick.sqlite", dockerfile)
+            self.assertNotIn("VOLUME ", dockerfile)
 
     def test_release_caption_uses_only_the_requested_versions_bullets(self):
         changelog = "# Dyntick 1.3.0\n\n- Sliding pages.\n- Softer numerals.\n\n# Dyntick 1.2.0\n\n- An older change.\n"
@@ -56,6 +56,7 @@ class ReleaseComposeTest(unittest.TestCase):
         self.assertIn("pull_policy: always", source)
         self.assertNotRegex(source, r"(?m)^\s*build:")
         self.assertNotIn("network.host", source)
+        self.assertIn("dyntick-data:/data", source)
 
     def test_pinned_release_preserves_ports_and_container_options(self):
         source = (root / "compose.yaml").read_text()
@@ -123,7 +124,7 @@ class ReleaseComposeTest(unittest.TestCase):
             stage = Path(directory)
             (stage / "site").mkdir()
             (stage / "site/index.html").write_text("<html></html>")
-            for name in ["Dockerfile", "README.md", "nginx.conf"]:
+            for name in ["Dockerfile", "README.md", "server.js"]:
                 (stage / name).write_text("")
             (stage / "compose.yaml").write_text((root / "compose.yaml").read_text())
             self.assertEqual(len(publisher.audited_files(stage)), 5)
