@@ -2,7 +2,15 @@
 
 A simple yet functional space to study.
 
-Dyntick is a student-made study dashboard with a Pomodoro timer and an activity tracker.
+Dyntick is a student-made study full dashboard with a Pomodoro timer and an activity tracker.
+
+## Why
+
+The project started from personal needs and exlopration of html/typescript language.
+
+At some point I thought that maybe other people would take advantage of this tool stay productive.
+
+## Preview
 
 ![Dyntick 2.0.0 main page in the light theme](docs/screenshots/pomodoro-v2.0.0-light.png)
 
@@ -14,7 +22,7 @@ Dyntick is a student-made study dashboard with a Pomodoro timer and an activity 
 
 ## Install
 
-Copy [compose.yaml](compose.yaml) into an empty folder on your server/homelab and run:
+Copy [compose.yaml](compose.yaml) into an empty folder on your server/homelab/pc and run:
 
 ```sh
 docker compose up -d
@@ -29,7 +37,8 @@ ports:
   - "CUSTOM_PORT:8080"
 ```
 
-Replace `CUSTOM_PORT` with the port you want to use, then open `http://SERVER_IP:CUSTOM_PORT`. The container continues listening on 8080.
+Replace `CUSTOM_PORT` with the port you want to use, then open `http://SERVER_IP:CUSTOM_PORT`.
+
 
 ## Upgrade from Dyntick 1.x
 
@@ -39,25 +48,16 @@ Replace `CUSTOM_PORT` with the port you want to use, then open `http://SERVER_IP
 2. Keep the same project folder and your chosen host port, such as `"8090:8080"`.
 3. Run `docker compose up -d --wait`.
 4. Refresh Dyntick first in the original browser tab that holds the preferences and current timer you want to keep. Use the same address, protocol and port as before so that it can read its old browser storage.
-5. Open the other browsers or devices that hold older study history to merge those records into the homelab database.
-
-The first browser imports its saved preferences, timer and activity. Version 1.x kept the current timer in that tab's session storage, so a newly opened tab may recover preferences and history without recovering the old timer. Later browsers add their historical completions, including an earned completion recovered from an expired legacy timer, without replacing the live shared timer or preferences. Imports use stable session IDs to avoid duplicates. The old browser keys remain as a backup; a marker records each confirmed import for this installation.
+5. Open the other browsers or devices that hold older study history to merge those records into the database.
 
 Browser storage is tied to its original address. If the address or port has already changed, reopen the old address with the new application to import that browser's data. Dyntick cannot recover browser data that has been cleared or read storage from another device remotely.
 
 ## Your data and devices
 
-Dyntick is a single-user installation with one shared set of data. There are no accounts: every device that can reach the installation can see and change the same data. Use it on your trusted home network or through your existing private remote-access setup.
+Dyntick is made upon the privacy-first and local-first principle.
+Personally I want my data private, without the need to rely on other people closed-source services. 
 
-- Preferences, including language, theme, durations and sound, are saved in SQLite and shared between devices.
-- The current timer is shared too. Starting, pausing, resuming, resetting or changing its mode on one device updates the others.
-- Completed focus sessions are stored in the same database. Refreshing, changing browsers or clearing browser site data does not remove this history.
-- The server records the timer's deadline. It recovers the current interval after a closed page, suspended device or container restart, without starting further intervals automatically.
-- Changes are confirmed after the server saves them. If the homelab becomes unreachable, the interface keeps the last received state, disables changes and retries the connection. Concurrent changes from another device are shown before you retry an outdated action.
 
-Connected pages refresh shared state regularly. The visual countdown follows the server's clock. The optional chime plays locally in each open browser and still requires that browser's audio permission; closing the page does not create a system notification.
-
-The application, fonts and API are served from your own installation. There is no analytics or telemetry and no external application API is required. The footer opens this repository when you choose its link. Browser storage is used only to recover legacy 1.x data and remember that its import completed.
 
 ## Updating & versions
 
