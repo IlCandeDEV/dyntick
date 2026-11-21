@@ -160,5 +160,11 @@ Dyntick's application code, documentation and build scripts use the [PolyForm No
 
 This is a **source-available, noncommercial project**. It is not offered under an OSI-approved open-source license. Dependencies and fonts retain their own licenses; the application license does not replace their terms. Font notices are included in [public/fonts](public/fonts).
 
+### Commercial distribution
+
+The following commercial distribution term is planned for future releases. Each published release is governed by the license shipped with it.
+
+> Selling, reselling, charging for access to, or distributing Dyntick for commercial purposes requires prior written permission from the copyright holder. This restriction applies to both original and modified copies.
+
 
 © 2026-2026 IlCandeDEV
