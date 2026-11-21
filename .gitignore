@@ -11,5 +11,9 @@ coverage/
 test-results/
 playwright-report/
 .ci-output/
+/AGENTS.md
+/DESIGN.md
+/RELEASE_NOTES.md
+/compose.preview.yaml
 __pycache__/
 *.py[cod]

@@ -32,6 +32,13 @@ jobs:
       DYNTICK_VERSION: ${{ inputs.version || '2.0.0' }}
     steps:
       - uses: actions/checkout@v7
+      - name: Verify the source excludes local development files
+        run: |
+          tracked=$(git ls-files -- AGENTS.md DESIGN.md RELEASE_NOTES.md compose.preview.yaml .ci-output/)
+          if [ -n "$tracked" ]; then
+            echo "::error::Remove local development files from the Git index before publication."
+            exit 1
+          fi
       - uses: docker/setup-buildx-action@v4
       - name: Resolve the candidate Bun base digest on the GitHub runner
         if: inputs.resolve_lock == true

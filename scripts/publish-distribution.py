@@ -34,7 +34,13 @@ def release_caption(version, changelog):
     following = re.search(r"^#{1,6}[ \t]+", section, re.M)
     if following:
         section = section[:following.start()]
-    bullets = [line.strip() for line in section.splitlines() if line.strip()]
+    return public_release_caption(version, section)
+
+
+def public_release_caption(version, notes):
+    if not VERSION.fullmatch(version):
+        raise ValueError("Expected a stable numeric version")
+    bullets = [line.strip() for line in notes.splitlines() if line.strip()]
     if not bullets or any(not line.startswith("- ") or not line[2:].strip() for line in bullets):
         raise ValueError("The release changelog must contain nonempty bullet points")
     caption = (f"Welcome to Dyntick v. {version}  \n"
@@ -149,16 +155,26 @@ def main():
     parser.add_argument("--ci-run", type=int, required=True)
     parser.add_argument("--image-run", type=int)
     parser.add_argument("--publish", action="store_true")
-    parser.add_argument("--changelog", type=Path, default=Path(__file__).resolve().parent.parent / "RELEASE_NOTES.md")
+    notes = parser.add_mutually_exclusive_group()
+    notes.add_argument("--release-notes", help="Approved public release bullets, one per line")
+    notes.add_argument("--changelog", type=Path, help="Preview the selected version from a local changelog")
     args = parser.parse_args()
     if not VERSION.fullmatch(args.version):
         parser.error("Expected a stable numeric version")
+    if args.publish and args.release_notes is None:
+        parser.error("Publication requires approved text via --release-notes")
+    caption = None
+    if args.release_notes is not None:
+        caption = public_release_caption(args.version, args.release_notes)
+    elif args.changelog is not None:
+        caption = release_caption(args.version, args.changelog.read_text(encoding="utf-8"))
     stage = Path(args.directory).resolve()
     files = audited_files(stage)
-    caption = release_caption(args.version, args.changelog.read_text())
     fingerprint = distribution_fingerprint(files)
-    print(json.dumps({"repository": PUBLIC_REPO, "version": args.version, "files": len(files),
-                      "fingerprint": fingerprint, "release_notes": caption}), flush=True)
+    audit = {"repository": PUBLIC_REPO, "version": args.version, "files": len(files), "fingerprint": fingerprint}
+    if caption is not None:
+        audit["release_notes"] = caption
+    print(json.dumps(audit), flush=True)
     if not args.publish:
         return
     repository = api("repositories/1455362824")

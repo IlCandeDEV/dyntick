@@ -1,5 +1,7 @@
 import importlib.util
 import hashlib
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
 import json
 from pathlib import Path
 import unittest
@@ -52,6 +54,36 @@ class ReleaseComposeTest(unittest.TestCase):
                        "student@gmail.com", "ghp_" + "x" * 40]:
             with self.subTest(detail=detail), self.assertRaisesRegex(ValueError, "Private metadata"):
                 publisher.release_caption("1.3.0", f"# Dyntick 1.3.0\n- {detail}\n")
+
+    def test_distribution_audit_runs_without_notes_and_accepts_public_bullets(self):
+        command = ["publish-distribution.py", ".", "--version", "1.3.0", "--ci-run", "123"]
+        notes = "- Sliding pages.\n- Softer numerals."
+        for extra in [[], ["--release-notes=" + notes]]:
+            with self.subTest(extra=extra), patch.object(sys, "argv", command + extra), \
+                    patch.object(publisher, "audited_files", return_value={"server.js": b"bundled"}), \
+                    patch.object(Path, "read_text", side_effect=AssertionError("No changelog was supplied")), \
+                    redirect_stdout(StringIO()) as output:
+                publisher.main()
+                result = json.loads(output.getvalue())
+                if extra:
+                    self.assertEqual(result["release_notes"], publisher.release_caption("1.3.0", f"# Dyntick 1.3.0\n{notes}"))
+                else:
+                    self.assertNotIn("release_notes", result)
+
+    def test_publication_requires_explicit_valid_release_notes_before_network_calls(self):
+        command = ["publish-distribution.py", ".", "--version", "1.3.0", "--ci-run", "123", "--publish"]
+        for extra in [[], ["--changelog", "RELEASE_NOTES.md"]]:
+            with self.subTest(extra=extra), patch.object(sys, "argv", command + extra), \
+                    patch.object(publisher, "api") as api, redirect_stderr(StringIO()) as error:
+                with self.assertRaises(SystemExit):
+                    publisher.main()
+                self.assertIn("Publication requires approved text via --release-notes", error.getvalue())
+                api.assert_not_called()
+        with patch.object(sys, "argv", command + ["--release-notes=- Public.\n# Internal"]), \
+                patch.object(publisher, "api") as api:
+            with self.assertRaisesRegex(ValueError, "nonempty bullet points"):
+                publisher.main()
+            api.assert_not_called()
 
     def test_default_pulls_latest_without_a_server_build(self):
         source = (root / "compose.yaml").read_text()
