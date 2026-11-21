@@ -20,6 +20,36 @@ At some point I thought that maybe other people would take advantage of this too
 
 *Dark theme · Dyntick 2.0.0.*
 
+
+
+## Features
+
+POMODORO TIMER: 
+- Default 25-minute focus, 5-minute short break and 15-minute long break after four focus sessions.
+- Configurable duration for focus and breaks.
+- Sound alarm for timer.
+- Study cycle map to better manage study session
+- Stats for every session.
+
+SYNC:
+- Sync data across all devices.
+
+LANGUAGE:
+- English (default)
+- Italian
+- German
+- Spanish
+
+THEMES:
+- System, light and dark themes
+
+ACCESSIBILITY:
+- Reduced motion support for ADHD people like me
+- Keyboard controls for faster switch between tabs
+
+
+
+
 ## Install
 
 Copy [compose.yaml](compose.yaml) into an empty folder on your server/homelab/pc and run:
@@ -75,15 +105,12 @@ For a specific release:
 DYNTICK_VERSION=2.0.0 docker compose up -d --build --wait
 ```
 
-Use the pinned Compose attached to the release to keep that choice. Numbered source and image tags are immutable; `latest` follows the newest verified stable release.
 
 Stop Dyntick with:
 
 ```sh
 docker compose down
 ```
-
-The database volume survives container recreation, normal updates and `docker compose down`. Start again from the same Compose project folder to reuse it. **Do not use `docker compose down -v` unless you intend to delete the saved data.**.
 
 
 ## Back up the database
@@ -100,18 +127,9 @@ Use a new backup folder for each backup. Keep the complete copied folder, includ
 
 To restore, keep Dyntick stopped while replacing its database files in the data volume. Restore a matching set of files; remove stale `-wal` and `-shm` files from the database being replaced. Preserve ownership `1000:1000` and restrictive file permissions so that the Bun user can access the restored data. Start the service only after the files and permissions are in place.
 
-## Features
 
-- Default 25-minute focus, 5-minute short break and 15-minute long break after four focus sessions.
-- Configurable durations from 1 to 180 minutes and cycles of one to six focus sessions.
-- Manual start for every next interval; background recovery completes only the interval that actually started.
-- One shared timer, preferences and persistent activity history across devices using the same installation.
-- An interactive oval cycle map, a daily activity calendar and separate Pomodoro, Activity and Settings pages.
-- English initially, with saved optional Italian, German and Spanish. Switching language preserves active and paused timers.
-- System, light and dark themes, reduced-motion support, IBM Plex Sans text and Rubik numerals.
-- Left/right arrows or H/L switch pages outside fields and menus. Space starts or pauses the timer and R resets it when an interactive control does not have focus. Settings lists the shortcuts.
 
-## Inspect and verify
+## Project inspect
 
 | Area | Source |
 | --- | --- |
@@ -125,31 +143,22 @@ To restore, keep Dyntick stopped while replacing its database files in the data 
 | Dependency versions and lockfile | [package.json](package.json), [bun.lock](bun.lock) |
 | Tests and build/release automation | [tests](tests), [.github/workflows](.github/workflows) |
 
-The [Actions page](https://github.com/IlCandeDEV/dyntick/actions) exposes production build, browser, persistence, runtime, image privacy and vulnerability checks. The only uploaded release attachment is `compose.yaml`. The `runtime-image.json` audit record is stored in the `runtime-image-VERSION` artifact of the release's Actions run; it links the image digest to its public source commit and successful verification runs.
 
-Runtime images carry public source, revision, version and license labels. Signed GitHub build attestations bind the published image digest to the public workflow. With the GitHub CLI, optional verification is:
+Dyntick uses:
+- TypeScript
+- React 19
+- Vite
+- Astryx interface
+- Bun
+- SQLite
 
-```sh
-gh attestation verify oci://ghcr.io/ilcandedev/dyntick-runtime:2.0.0 --repo IlCandeDEV/dyntick
-```
-
-Public source and automated checks make independent review possible; they do not establish that every potential defect has been found.
-
-## Build and contribute
-
-Dyntick uses TypeScript, React 19, Vite and Astryx Neutral for the interface. Bun 1.4.4 provides the build and test toolchain, HTTP runtime and built-in SQLite driver. Dependencies are pinned through `package.json` and the committed `bun.lock`. Official images contain the compiled interface, bundled API, runtime and license notices.
-
-Run these development checks on a GitHub runner:
-
-```sh
-bun install --frozen-lockfile
-bun run check
-bun run test
-bun run build
-```
 
 ## License
+
 
 Dyntick's application code, documentation and build scripts use the [PolyForm Noncommercial License 1.0.0](LICENSE). You can inspect the code and use, modify and redistribute it for the purposes permitted by that license, including personal study and qualifying noncommercial uses. Commercial use outside those permitted purposes requires separate permission from the copyright holder.
 
 This is a **source-available, noncommercial project**. It is not offered under an OSI-approved open-source license. Dependencies and fonts retain their own licenses; the application license does not replace their terms. Font notices are included in [public/fonts](public/fonts).
+
+
+© 2026-2026 IlCandeDEV
