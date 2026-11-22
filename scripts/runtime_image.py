@@ -208,47 +208,9 @@ def promote_latest(version, ci_run, image_run):
     print(json.dumps({"image": IMAGE + ":latest", "digest": proof["digest"]}))
 
 
-def archive_release_proof(version, output):
-    """Copy an existing release proof verbatim for archival by GitHub Actions."""
-    if not VERSION.fullmatch(version) or output is None:
-        raise ValueError("Expected a stable version and an archive directory")
-    release = api(f"repos/{PUBLIC_REPO}/releases/tags/{version}")
-    if release["tag_name"] != version or release["draft"] or release["prerelease"]:
-        raise ValueError("Expected a published stable release")
-    assets = [asset for asset in release["assets"] if asset["name"] == "runtime-image.json"]
-    if len(assets) != 1:
-        raise ValueError("Expected one runtime-image.json attachment to archive")
-    source = api(f"repos/{PUBLIC_REPO}/git/ref/tags/{version}")["object"]
-    if source["type"] != "commit":
-        raise ValueError("Expected the immutable release tag to point to a source commit")
-    result = subprocess.run(["gh", "api", "-H", "Accept: application/octet-stream",
-        f"repos/{PUBLIC_REPO}/releases/assets/{assets[0]['id']}"], capture_output=True, check=True)
-    proof = json.loads(result.stdout)
-    if not isinstance(proof, dict) or type(proof.get("ci_run")) is not int or proof["ci_run"] <= 0:
-        raise ValueError("Invalid runtime image audit record")
-    fingerprint = proof.get("fingerprint")
-    artifact_digest = proof.get("artifact_digest")
-    if (not isinstance(fingerprint, str) or not re.fullmatch(r"[0-9a-f]{64}", fingerprint) or
-            not isinstance(artifact_digest, str) or not DIGEST.fullmatch(artifact_digest)):
-        raise ValueError("Missing or invalid CI artifact fingerprint")
-    production = successful_run(proof["ci_run"], {".github/workflows/ci.yml", ".github/workflows/release.yml"})
-    if production["head_sha"] != source["sha"]:
-        raise ValueError("The proof must refer to verification of this release's source commit")
-    validate_proof(proof, version, proof["ci_run"], fingerprint, source["sha"])
-    digest, _ = anonymous_manifest(version)
-    if digest != proof["digest"]:
-        raise ValueError("The proof must match the publicly available numbered image")
-    output.mkdir(parents=True, exist_ok=False)
-    (output / "runtime-image.json").write_bytes(result.stdout)
-    record = {"version": version, "source_sha": source["sha"], "image_digest": digest,
-        "release_asset_id": assets[0]["id"], "sha256": hashlib.sha256(result.stdout).hexdigest()}
-    print(json.dumps(record))
-    return record
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("operation", choices=["stage", "record", "latest", "platform", "archive"])
+    parser.add_argument("operation", choices=["stage", "record", "latest", "platform"])
     parser.add_argument("--version", required=True)
     parser.add_argument("--ci-run", type=int)
     parser.add_argument("--image-run", type=int)
@@ -263,8 +225,6 @@ def main():
         record_image(args.version, args.proof, args.digest)
     elif args.operation == "latest":
         promote_latest(args.version, args.ci_run, args.image_run)
-    elif args.operation == "archive":
-        archive_release_proof(args.version, args.directory)
     else:
         print(platform_digest(args.digest, args.architecture))
 
