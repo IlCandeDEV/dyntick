@@ -201,7 +201,7 @@ def record_image(version, proof_path, digest):
 def promote_latest(version, ci_run, image_run):
     proof = check_image_release(version, ci_run, image_run)
     release = api(f"repos/{PUBLIC_REPO}/releases/latest")
-    if release["tag_name"] != "v" + version or release["draft"] or release["prerelease"]:
+    if release["tag_name"] != version or release["draft"] or release["prerelease"]:
         raise ValueError("Only the current stable public release may advance the image latest tag")
     create_image_tag("latest", proof["digest"], rolling=True)
     check_image_release(version, ci_run, image_run, latest=True)
@@ -212,13 +212,13 @@ def archive_release_proof(version, output):
     """Copy an existing release proof verbatim for archival by GitHub Actions."""
     if not VERSION.fullmatch(version) or output is None:
         raise ValueError("Expected a stable version and an archive directory")
-    release = api(f"repos/{PUBLIC_REPO}/releases/tags/v{version}")
-    if release["tag_name"] != "v" + version or release["draft"] or release["prerelease"]:
+    release = api(f"repos/{PUBLIC_REPO}/releases/tags/{version}")
+    if release["tag_name"] != version or release["draft"] or release["prerelease"]:
         raise ValueError("Expected a published stable release")
     assets = [asset for asset in release["assets"] if asset["name"] == "runtime-image.json"]
     if len(assets) != 1:
         raise ValueError("Expected one runtime-image.json attachment to archive")
-    source = api(f"repos/{PUBLIC_REPO}/git/ref/tags/v{version}")["object"]
+    source = api(f"repos/{PUBLIC_REPO}/git/ref/tags/{version}")["object"]
     if source["type"] != "commit":
         raise ValueError("Expected the immutable release tag to point to a source commit")
     result = subprocess.run(["gh", "api", "-H", "Accept: application/octet-stream",

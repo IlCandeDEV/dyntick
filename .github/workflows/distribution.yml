@@ -46,7 +46,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/dyntick-compose-only" "$RUNNER_TEMP/dyntick-anonymous"
           echo "DOCKER_CONFIG=$RUNNER_TEMP/dyntick-anonymous" >> "$GITHUB_ENV"
           if [[ "$CHANNEL" == version ]]; then
-            url="https://github.com/IlCandeDEV/dyntick/releases/download/v$VERSION/compose.yaml"
+            url="https://github.com/IlCandeDEV/dyntick/releases/download/$VERSION/compose.yaml"
           else
             url="https://raw.githubusercontent.com/IlCandeDEV/dyntick/latest/compose.yaml"
           fi

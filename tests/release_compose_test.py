@@ -154,6 +154,15 @@ class ReleaseComposeTest(unittest.TestCase):
             runtime_image.create_image_tag("1.5.0", old)
             command.assert_not_called()
 
+    def test_latest_image_promotion_uses_the_numeric_release_tag(self):
+        digest = "sha256:" + "a" * 64
+        release = {"tag_name": "2.0.0", "draft": False, "prerelease": False}
+        with patch.object(runtime_image, "api", return_value=release), \
+                patch.object(runtime_image, "check_image_release", return_value={"digest": digest}), \
+                patch.object(runtime_image, "create_image_tag") as tag, redirect_stdout(StringIO()):
+            runtime_image.promote_latest("2.0.0", 123, 456)
+            tag.assert_called_once_with("latest", digest, rolling=True)
+
     def test_public_audit_rejects_extra_files_private_metadata_and_nonempty_readme(self):
         with tempfile.TemporaryDirectory() as directory:
             stage = Path(directory)
@@ -198,12 +207,12 @@ class ReleaseComposeTest(unittest.TestCase):
             "source_sha": source, "digest": digest, "source_repository": runtime_image.SOURCE_REPO,
             "source_url": f"https://github.com/{runtime_image.SOURCE_REPO}/commit/{source}",
             "license": "PolyForm-Noncommercial-1.0.0", "architectures": runtime_image.ARCHITECTURES}
-        release = {"tag_name": "v2.0.0", "draft": False, "prerelease": False,
+        release = {"tag_name": "2.0.0", "draft": False, "prerelease": False,
             "assets": [{"name": "compose.yaml", "id": 100}, {"name": "runtime-image.json", "id": 101}]}
         def read_api(path):
-            if path == f"repos/{runtime_image.PUBLIC_REPO}/releases/tags/v2.0.0":
+            if path == f"repos/{runtime_image.PUBLIC_REPO}/releases/tags/2.0.0":
                 return release
-            if path == f"repos/{runtime_image.PUBLIC_REPO}/git/ref/tags/v2.0.0":
+            if path == f"repos/{runtime_image.PUBLIC_REPO}/git/ref/tags/2.0.0":
                 return {"object": {"type": "commit", "sha": source}}
             raise AssertionError("Unexpected API request: " + path)
         return proof, release, source, digest, read_api

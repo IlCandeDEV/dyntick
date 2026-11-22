@@ -191,11 +191,11 @@ def main():
     if api(f"repos/{PUBLIC_REPO}/git/ref/heads/main")["object"]["sha"] != source_sha:
         raise ValueError("Release the production-verified source main revision")
     proof = check_image_release(args.version, args.ci_run, args.image_run, fingerprint)
-    existing = api(f"repos/{PUBLIC_REPO}/releases/tags/v{args.version}", missing=True)
+    release_path = f"repos/{PUBLIC_REPO}/releases/tags/{args.version}"
+    existing = api(release_path, missing=True)
     latest = api(f"repos/{PUBLIC_REPO}/releases/latest")
     if not existing and tuple(map(int, args.version.split("."))) <= tuple(map(int, latest["tag_name"].removeprefix("v").split("."))):
         raise ValueError("A new stable release must be newer than the current latest")
-    tag("v" + args.version, source_sha)
     tag(args.version, source_sha)
     assets_path = stage.parent / ("release-" + args.version)
     assets_path.mkdir(parents=True, exist_ok=True)
@@ -208,10 +208,10 @@ def main():
     notes_path = assets_path / "notes.md"
     notes_path.write_text(caption)
     if not existing:
-        subprocess.run(["gh", "release", "create", "v" + args.version, str(compose_path),
+        subprocess.run(["gh", "release", "create", args.version, str(compose_path),
                         "--repo", PUBLIC_REPO, "--verify-tag", "--title", "Dyntick v. " + args.version,
                         "--notes-file", str(notes_path)], check=True)
-    release = api(f"repos/{PUBLIC_REPO}/releases/tags/v{args.version}")
+    release = api(release_path)
     if release["draft"] or release["prerelease"] or release["body"] != caption:
         raise ValueError("Published release description differs from the verified changelog")
     verify_release_assets(release, {"compose.yaml": compose_path.read_bytes()})
