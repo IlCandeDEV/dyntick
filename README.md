@@ -8,7 +8,7 @@ Dyntick is a student-made study full dashboard with a Pomodoro timer and an acti
 
 The project started from personal needs and exlopration of html/typescript language.
 
-At some point I thought that maybe other people would take advantage of this tool stay productive.
+At some point I thought that maybe other people would take advantage of this tool to stay productive.
 
 ## Preview
 
@@ -31,12 +31,20 @@ POMODORO TIMER:
 - Study cycle map to better manage study session
 - Stats for every session.
 
+ACTIVITY:
+- Activity tracker for session
+- GitHub style calendar visualization
+
+PLANNING:
+- Exam planning and subdivision for each session/semester
+- Automatic course credit calculation
+
 SYNC:
 - Sync data across all devices.
 
 LANGUAGE:
 - English (default)
-- Italian
+- Italian (best)
 - German
 - Spanish
 
@@ -45,7 +53,11 @@ THEMES:
 
 ACCESSIBILITY:
 - Reduced motion support for ADHD people like me
-- Keyboard controls for faster switch between tabs
+- Reset settings to default
+- Keyboard controls for faster switch between tabs (vim style)
+
+
+
 
 
 
@@ -70,6 +82,9 @@ ports:
 Replace `CUSTOM_PORT` with the port you want to use, then open `http://SERVER_IP:CUSTOM_PORT`.
 
 
+
+
+
 ## Upgrade from Dyntick 1.x
 
 **IF YOU ARE UPDATING FROM 1.x replace your old Compose file before starting version 2.0.0.** The 1.x Compose has a read-only filesystem and no database volume. Updating its image alone does not provide the persistent storage required by 2.0.0.
@@ -81,6 +96,9 @@ Replace `CUSTOM_PORT` with the port you want to use, then open `http://SERVER_IP
 5. Open the other browsers or devices that hold older study history to merge those records into the database.
 
 Browser storage is tied to its original address. If the address or port has already changed, reopen the old address with the new application to import that browser's data. Dyntick cannot recover browser data that has been cleared or read storage from another device remotely.
+
+
+
 
 ## Your data and devices
 
