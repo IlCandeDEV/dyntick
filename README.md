@@ -64,11 +64,31 @@ ACCESSIBILITY:
 
 ## Install
 
+Here's a step by step guide to install and use Dyntick.
+
+### STEP 1
+
+*Prerequisites*
+
+Install docker on your machine.
+> MACOS: https://docs.docker.com/desktop/setup/install/mac-install/
+
+> LINUX: https://docs.docker.com/engine/install/
+
+> WINDOWS: https://docs.docker.com/desktop/setup/install/windows-install/
+
+
+### STEP 2
+
 Copy [compose.yaml](compose.yaml) into an empty folder on your server/homelab/pc and run:
 
 ```sh
 docker compose up -d
 ```
+
+
+
+### STEP 3
 
 Open `http://SERVER_IP:8080`. Docker automatically pulls the ready-to-run public image.
 
