@@ -7,7 +7,9 @@ const supportsAnchoredPopover = typeof HTMLElement !== "undefined" &&
   CSS.supports("anchor-name", "--select-trigger") && CSS.supports("position-area", "bottom") &&
   CSS.supports("position-try-fallbacks", "flip-block");
 
-type SelectMenuProps = Pick<ComponentProps<typeof Selector>,
+type NonClearableSelectorProps = Extract<ComponentProps<typeof Selector>, { hasClear?: false }>;
+
+type SelectMenuProps = Pick<NonClearableSelectorProps,
   "label" | "isLabelHidden" | "value" | "options" | "onChange" | "isDisabled" | "renderValue"
 > & {
   icon: IconName;
@@ -17,7 +19,7 @@ type SelectMenuProps = Pick<ComponentProps<typeof Selector>,
 };
 
 export function SelectMenu({ icon, className, isLabelHidden = true, ...props }: SelectMenuProps) {
-  return <Selector {...props} isLabelHidden={isLabelHidden}
+  return <Selector {...props} hasClear={false} isLabelHidden={isLabelHidden}
     variant="secondary" size="sm" presentation={supportsAnchoredPopover ? "adaptive" : "bottom-sheet"} placement="below"
     startIcon={<Icon name={icon} width="17" height="17" />}
     containerClassName={className ? `select-menu ${className}` : "select-menu"} controlClassName="select-trigger" />;
