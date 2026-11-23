@@ -1,22 +1,24 @@
 import { afterEach, test } from "bun:test";
+import { Database } from "bun:sqlite";
 import { deepEqual, equal, notEqual, ok } from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createApplication } from "../server/app.ts";
+import { createApplication, type ApplicationOptions } from "../server/app.ts";
 import { createTimer, DEFAULT_PREFERENCES, pauseTimer, startTimer } from "../src/timer.ts";
 import type { Snapshot } from "../src/protocol.ts";
+import { academicYearAt, DEFAULT_SESSION_MONTHS, formatExamDate, MAX_EXAM_CREDITS, MAX_EXAM_NAME_LENGTH, parseExamDate } from "../src/planning.ts";
 
 const origin = "http://dyntick.test:8080";
 const start = 1_800_000_000_000;
 const cleanup: (() => void)[] = [];
 afterEach(() => { while (cleanup.length) cleanup.pop()!(); });
 
-function fixture() {
+function fixture(fetchRelease?: ApplicationOptions["fetchRelease"]) {
   const directory = mkdtempSync(join(tmpdir(), "dyntick-api-"));
   cleanup.push(() => rmSync(directory, { recursive: true, force: true }));
   let now = start;
-  const options = { databasePath: join(directory, "dyntick.sqlite"), now: () => now };
+  const options = { databasePath: join(directory, "dyntick.sqlite"), now: () => now, fetchRelease };
   let app = createApplication(options);
   cleanup.push(() => app.close());
   let nextId = 0;
@@ -41,6 +43,44 @@ function fixture() {
     reopen: () => { app.close(); app = createApplication(options); },
   };
 }
+
+test("the latest release is shared across readers and refreshed after the cache expires", async () => {
+  let calls = 0;
+  let tag: string | null = "v2.0.1";
+  const f = fixture((url, init) => {
+    equal(url, "https://api.github.com/repos/IlCandeDEV/dyntick/releases/latest");
+    equal(new Headers(init.headers).get("authorization"), null);
+    ok(init.signal);
+    calls++;
+    return Promise.resolve(tag ? Response.json({ tag_name: tag }) : new Response(null, { status: 503 }));
+  });
+  const path = "/api/latest-release";
+  const read = async () => (await f.request(path)).json();
+  equal((await f.request(path, { method: "POST" })).status, 405);
+  await f.state();
+  equal(calls, 0, "Reading timer state must leave the release check idle");
+  deepEqual(await Promise.all([read(), read()]), [{ version: "2.0.1" }, { version: "2.0.1" }]);
+  equal(calls, 1);
+  const hour = 60 * 60_000;
+  f.setTime(start + hour - 1);
+  deepEqual(await read(), { version: "2.0.1" });
+  equal(calls, 1);
+  f.setTime(start + hour);
+  tag = null;
+  deepEqual(await read(), { version: "2.0.1" });
+  deepEqual(await read(), { version: "2.0.1" });
+  equal(calls, 2, "An upstream failure must not make every request retry");
+  f.setTime(start + hour + 5 * 60_000);
+  tag = "2.0.2";
+  deepEqual(await read(), { version: "2.0.2" });
+  equal(calls, 3);
+});
+
+test("the release check records no version when the upstream tag is invalid", async () => {
+  const f = fixture(() => Promise.resolve(Response.json({ tag_name: "2.0.1-rc.1" })));
+  deepEqual(await (await f.request("/api/latest-release")).json(), { version: null });
+  equal((await f.state()).revision, 0);
+});
 
 test("a new SQLite instance starts with English defaults and a stable server identity", async () => {
   const f = fixture();
@@ -121,6 +161,7 @@ test("a long break follows the configured number of completed sessions and start
   const f = fixture();
   await f.apply({ type: "preferences", patch: { longBreakInterval: 2 } });
   let nextStart = start;
+  const breaks = [];
   for (let index = 0; index < 2; index++) {
     f.setTime(nextStart);
     const focus = await f.apply({ type: "start" });
@@ -133,14 +174,19 @@ test("a long break follows the configured number of completed sessions and start
     equal(pause.timer.mode, index === 0 ? "shortBreak" : "longBreak");
     equal(pause.timer.durationMs, (index === 0 ? 5 : 15) * 60_000);
     f.setTime(pause.timer.endAt!);
-    equal((await f.state()).timer.status, "completed");
-    equal(Object.keys((await f.state()).activity.entries).length, index + 1, "Breaks never add study activity");
+    breaks.push({ mode: pause.timer.mode, afterFocus: index + 1 });
+    f.reopen();
+    const completed = await f.state();
+    equal(completed.timer.status, "completed");
+    deepEqual(completed.timer.completedBreaks, breaks);
+    equal(Object.keys(completed.activity.entries).length, index + 1, "Breaks never add study activity");
     nextStart = pause.timer.endAt! + 1;
   }
   f.setTime(nextStart);
   const nextCycle = await f.apply({ type: "start" });
   equal(nextCycle.timer.mode, "focus");
   equal(nextCycle.timer.completedFocuses, 0);
+  deepEqual(nextCycle.timer.completedBreaks, []);
 });
 
 test("language, theme and future durations preserve running and paused sessions", async () => {
@@ -155,6 +201,253 @@ test("language, theme and future durations preserve running and paused sessions"
   equal(changed.timer.remainingMs, paused.timer.remainingMs);
   equal(changed.timer.status, "paused");
   equal((await f.apply({ type: "reset" })).timer.durationMs, 50 * 60_000);
+});
+
+test("an existing database adds exam planning and preserves its running timer", async () => {
+  const f = fixture();
+  const running = await f.apply({ type: "start" });
+  const legacy = new Database(join(f.directory, "dyntick.sqlite"));
+  legacy.exec("DROP TABLE exams; DROP TABLE session_months; PRAGMA user_version = 1;");
+  legacy.close();
+  f.reopen();
+  const upgraded = await f.state();
+  deepEqual(upgraded.exams, []);
+  deepEqual(upgraded.sessionMonths, DEFAULT_SESSION_MONTHS);
+  deepEqual(upgraded.timer, running.timer);
+
+  const exam = { id: "systems", name: "Operating Systems", academicYear: 2026, session: null };
+  const create = { type: "exam.create", exam: { ...exam, name: "  Operating Systems  " } };
+  const created = await f.action(create, upgraded.revision, "add-systems");
+  equal(created.status, 200);
+  const added = await created.json() as Snapshot;
+  deepEqual(added.exams, [{ ...exam, credits: 0, examDate: null }]);
+  const duplicate = await f.action(create, upgraded.revision, "add-systems");
+  equal(duplicate.status, 200);
+  equal((await duplicate.json() as Snapshot).revision, added.revision);
+
+  const winter = await f.apply({ type: "exam.update", id: exam.id, patch: { session: "winter" } });
+  deepEqual(winter.exams, [{ ...exam, session: "winter", credits: 0, examDate: null }]);
+  const stale = await f.action({ type: "exam.update", id: exam.id, patch: { session: "resit" } }, added.revision);
+  equal(stale.status, 409);
+  const renamed = await f.apply({ type: "exam.update", id: exam.id, patch: { name: "Computer Systems" } });
+  equal(renamed.exams[0].session, "winter");
+  f.reopen();
+  deepEqual((await f.state()).exams, renamed.exams);
+  const unscheduled = await f.apply({ type: "exam.update", id: exam.id, patch: { session: null } });
+  equal(unscheduled.exams[0].session, null);
+  const deleted = await f.apply({ type: "exam.delete", id: exam.id });
+  deepEqual(deleted.exams, []);
+  deepEqual(deleted.timer, running.timer);
+  equal((await f.action({ type: "exam.update", id: exam.id, patch: { session: "summer" } })).status, 409);
+});
+
+test("existing exams get zero credits without losing their planning or request history", async () => {
+  const f = fixture();
+  const exam = { id: "existing", name: "Calculus", academicYear: 2026, session: "winter" };
+  const create = { type: "exam.create", exam };
+  const revision = (await f.state()).revision;
+  const saved = await f.action(create, revision, "existing-exam");
+  equal(saved.status, 200);
+  const legacy = new Database(join(f.directory, "dyntick.sqlite"));
+  legacy.exec("ALTER TABLE exams DROP COLUMN credits; ALTER TABLE exams DROP COLUMN exam_date; PRAGMA user_version = 1;");
+  const legacyFingerprint = new Bun.CryptoHasher("sha256").update(JSON.stringify({ revision, action: create })).digest("hex");
+  legacy.query("UPDATE requests SET fingerprint = ? WHERE id = ?").run(legacyFingerprint, "existing-exam");
+  legacy.close();
+  f.reopen();
+  deepEqual((await f.state()).exams, [{ ...exam, credits: 0, examDate: null }]);
+  equal((await f.action(create, revision, "existing-exam")).status, 200);
+
+  await f.apply({ type: "exam.update", id: exam.id, patch: { credits: MAX_EXAM_CREDITS } });
+  await f.apply({ type: "exam.update", id: exam.id, patch: { session: "summer" } });
+  f.reopen();
+  deepEqual((await f.state()).exams, [{ ...exam, session: "summer", credits: MAX_EXAM_CREDITS, examDate: null }]);
+  const reset = await f.apply({ type: "exam.update", id: exam.id, patch: { credits: 0 } });
+  equal(reset.exams[0].credits, 0);
+});
+
+test("a version 2 plan keeps its exams and timer when the credit range is widened", async () => {
+  const f = fixture();
+  const exam = { id: "previous-credit-limit", name: "Calculus", academicYear: 2026, session: "winter", credits: 12 };
+  await f.apply({ type: "exam.create", exam });
+  const running = await f.apply({ type: "start" });
+  const database = new Database(join(f.directory, "dyntick.sqlite"));
+  database.exec(`
+    CREATE TABLE legacy_exams (
+      id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL,
+      academic_year INTEGER NOT NULL CHECK (academic_year BETWEEN 1000 AND 9998),
+      session TEXT CHECK (session IN ('winter', 'summer', 'resit')),
+      credits INTEGER NOT NULL DEFAULT 0 CHECK (credits BETWEEN 0 AND 12)
+    );
+    INSERT INTO legacy_exams SELECT id, name, academic_year, session, credits FROM exams;
+    DROP TABLE exams;
+    ALTER TABLE legacy_exams RENAME TO exams;
+    UPDATE study_state SET preferences = json_remove(preferences, '$.creditSystem');
+    PRAGMA user_version = 2;
+  `);
+  database.close();
+
+  f.reopen();
+  const migrated = await f.state();
+  deepEqual(migrated.exams, [{ ...exam, examDate: null }]);
+  deepEqual(migrated.preferences, running.preferences);
+  deepEqual(migrated.timer, running.timer);
+  equal(migrated.revision, running.revision);
+  equal((await f.action({ type: "preferences", patch: { creditSystem: "unknown" } })).status, 400);
+  const ects = await f.apply({ type: "preferences", patch: { creditSystem: "ECTS" } });
+  equal(ects.preferences.creditSystem, "ECTS");
+  const cats = await f.apply({ type: "preferences", patch: { creditSystem: "CATS" } });
+  equal(cats.preferences.creditSystem, "CATS");
+  deepEqual(cats.exams, migrated.exams);
+  deepEqual(cats.timer, running.timer);
+
+  await f.apply({ type: "exam.update", id: exam.id, patch: { credits: MAX_EXAM_CREDITS } });
+  f.reopen();
+  const saved = await f.state();
+  equal(saved.preferences.creditSystem, "CATS");
+  deepEqual(saved.exams, [{ ...exam, credits: MAX_EXAM_CREDITS, examDate: null }]);
+});
+
+test("exam dates are optional calendar dates and survive migration, changes of session and restarts", async () => {
+  const f = fixture();
+  const exam = { id: "dated-exam", name: "Calculus", academicYear: 2027, session: "winter", credits: 9 };
+  const create = { type: "exam.create", exam };
+  const revision = (await f.state()).revision;
+  equal((await f.action(create, revision, "before-exam-dates")).status, 200);
+  const database = new Database(join(f.directory, "dyntick.sqlite"));
+  database.exec("ALTER TABLE exams DROP COLUMN exam_date; PRAGMA user_version = 3;");
+  database.close();
+  f.reopen();
+  deepEqual((await f.state()).exams, [{ ...exam, examDate: null }]);
+  equal((await f.action(create, revision, "before-exam-dates")).status, 200);
+
+  for (const examDate of ["2026-02-29", "2028-04-31", "2028-2-29", "0000-02-29", "2028-02-29T00:00:00Z", 20280229]) {
+    equal((await f.action({ type: "exam.create", exam: { ...exam, examDate } })).status, 400);
+    equal((await f.action({ type: "exam.update", id: exam.id, patch: { examDate } })).status, 400);
+  }
+  const examDate = "2028-02-29";
+  const added = await f.apply({ type: "exam.create", exam: { ...exam, id: "second-exam", examDate } });
+  equal(added.exams[1].examDate, examDate);
+  await f.apply({ type: "exam.update", id: exam.id, patch: { examDate } });
+  await f.apply({ type: "exam.update", id: exam.id, patch: { session: "resit" } });
+  f.reopen();
+  deepEqual((await f.state()).exams[0], { ...exam, session: "resit", examDate });
+  const cleared = await f.apply({ type: "exam.update", id: exam.id, patch: { examDate: null } });
+  deepEqual(cleared.exams[0], { ...exam, session: "resit", examDate: null });
+});
+
+test("both numeric date formats map to the same calendar date and validate the entered day and month", () => {
+  equal(formatExamDate("2028-02-09", "dmy"), "09/02/2028");
+  equal(formatExamDate("2028-02-09", "mdy"), "02/09/2028");
+  equal(parseExamDate(" 9/2/2028 ", "dmy"), "2028-02-09");
+  equal(parseExamDate("02/09/2028", "mdy"), "2028-02-09");
+  equal(parseExamDate("02/09/2028", "dmy"), "2028-09-02");
+  equal(parseExamDate("29/02/2028", "dmy"), "2028-02-29");
+  equal(parseExamDate("29/02/2028", "mdy"), null);
+  equal(parseExamDate("02/29/2027", "mdy"), null);
+  equal(parseExamDate("31/04/2028", "dmy"), null);
+});
+
+test("an existing installation defaults to European dates and can save American format without changing its exams", async () => {
+  const f = fixture();
+  const exam = { id: "date-format", name: "Calculus", academicYear: 2027, session: "winter", credits: 6, examDate: "2028-02-09" };
+  await f.apply({ type: "exam.create", exam });
+  const running = await f.apply({ type: "start" });
+  const database = new Database(join(f.directory, "dyntick.sqlite"));
+  database.exec("UPDATE study_state SET preferences = json_remove(preferences, '$.dateFormat'); PRAGMA user_version = 4;");
+  database.close();
+  f.reopen();
+  const migrated = await f.state();
+  deepEqual(migrated.preferences, running.preferences);
+  equal(migrated.preferences.dateFormat, "dmy");
+  equal((await f.action({ type: "preferences", patch: { dateFormat: "ymd" } })).status, 400);
+  await f.apply({ type: "preferences", patch: { dateFormat: "mdy" } });
+  f.reopen();
+  const saved = await f.state();
+  equal(saved.preferences.dateFormat, "mdy");
+  deepEqual(saved.exams, [exam]);
+  deepEqual(saved.timer, running.timer);
+});
+
+test("exam planning validates names, sessions, academic years and credits before saving", async () => {
+  const f = fixture();
+  const exam = { id: "invalid", name: "Calculus", academicYear: 2026, session: "summer" };
+  for (const invalid of [
+    { ...exam, session: "spring" }, { ...exam, name: "   " },
+    { ...exam, name: "a".repeat(MAX_EXAM_NAME_LENGTH + 1) }, { ...exam, academicYear: 2026.5 },
+  ]) {
+    equal((await f.action({ type: "exam.create", exam: invalid })).status, 400);
+  }
+  deepEqual((await f.state()).exams, []);
+
+  for (const credits of [-1, MAX_EXAM_CREDITS + 1, 3.5, "9", null]) {
+    equal((await f.action({ type: "exam.create", exam: { ...exam, credits } })).status, 400);
+  }
+  const atLimit = { ...exam, name: "W".repeat(MAX_EXAM_NAME_LENGTH), credits: MAX_EXAM_CREDITS };
+  deepEqual((await f.apply({ type: "exam.create", exam: atLimit })).exams, [{ ...atLimit, examDate: null }]);
+  equal((await f.action({ type: "exam.update", id: exam.id, patch: { name: `${atLimit.name}W` } })).status, 400);
+  equal((await f.action({ type: "exam.update", id: exam.id, patch: { credits: MAX_EXAM_CREDITS + 1 } })).status, 400);
+
+  const legacyName = "W".repeat(120);
+  const db = new Database(join(f.directory, "dyntick.sqlite"));
+  db.query("UPDATE exams SET name = ? WHERE id = ?").run(legacyName, exam.id);
+  db.close();
+  const moved = await f.apply({ type: "exam.update", id: exam.id, patch: { session: "winter" } });
+  deepEqual(moved.exams, [{ ...exam, name: legacyName, session: "winter", credits: MAX_EXAM_CREDITS, examDate: null }]);
+  equal(academicYearAt(new Date(2027, 8, 30)), 2026);
+  equal(academicYearAt(new Date(2027, 9, 1)), 2027);
+});
+
+test("session months are validated and saved independently of exams and the timer", async () => {
+  const f = fixture();
+  const initial = await f.apply({ type: "start" });
+  const update = { type: "session.months", session: "winter", months: [2, 12, 1] };
+  for (const months of [[], [0], [13], [1, 1], ["1"]]) {
+    equal((await f.action({ ...update, months })).status, 400);
+  }
+  equal((await f.action({ ...update, session: null })).status, 400);
+  const result = await f.action(update, initial.revision, "winter-months");
+  equal(result.status, 200);
+  const updated = await result.json() as Snapshot;
+  deepEqual(updated.sessionMonths, { ...DEFAULT_SESSION_MONTHS, winter: [12, 1, 2] });
+  deepEqual(updated.timer, initial.timer);
+  deepEqual(updated.exams, initial.exams);
+  const retry = await f.action({ ...update, months: [1, 2, 12] }, initial.revision, "winter-months");
+  equal(retry.status, 200);
+  equal((await retry.json() as Snapshot).revision, updated.revision);
+  equal((await f.action({ ...update, months: [3] }, initial.revision)).status, 409);
+  f.reopen();
+  deepEqual((await f.state()).sessionMonths, updated.sessionMonths);
+});
+
+test("restoring preferences commits every exam period together", async () => {
+  const f = fixture();
+  await f.apply({ type: "preferences", patch: { focusMinutes: 45 } });
+  const exam = { id: "restore-periods-exam", name: "Systems", academicYear: 2026, session: "winter", credits: 9, examDate: "2027-01-15" };
+  await f.apply({ type: "exam.create", exam });
+  await f.apply({ type: "session.months", session: "winter", months: [12] });
+  await f.apply({ type: "session.months", session: "summer", months: [8] });
+  await f.apply({ type: "session.months", session: "resit", months: [10] });
+  const before = await f.apply({ type: "start" });
+  const restore = {
+    type: "preferences", patch: { focusMinutes: DEFAULT_PREFERENCES.focusMinutes }, sessionMonths: DEFAULT_SESSION_MONTHS,
+  };
+  const invalid = { ...restore, sessionMonths: { ...DEFAULT_SESSION_MONTHS, resit: [13] } };
+  equal((await f.action(invalid, before.revision)).status, 400);
+  deepEqual(await f.state(), before);
+
+  const result = await f.action(restore, before.revision, "restore-months");
+  equal(result.status, 200);
+  const saved = await result.json() as Snapshot;
+  deepEqual(saved.sessionMonths, DEFAULT_SESSION_MONTHS);
+  equal(saved.preferences.focusMinutes, DEFAULT_PREFERENCES.focusMinutes);
+  deepEqual(saved.exams, [exam]);
+  deepEqual(saved.timer, before.timer);
+  equal(saved.revision, before.revision + 1);
+  const retry = await f.action(restore, before.revision, "restore-months");
+  equal(retry.status, 200);
+  equal((await retry.json() as Snapshot).revision, saved.revision);
+  f.reopen();
+  deepEqual((await f.state()).sessionMonths, DEFAULT_SESSION_MONTHS);
 });
 
 test("concurrent devices cannot overwrite a newer revision", async () => {

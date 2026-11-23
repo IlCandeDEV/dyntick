@@ -30,7 +30,9 @@ export function cyclePhases(preferences: Preferences, timer: TimerState): CycleP
         minutes: active ? Math.round(timer.durationMs / 60_000) : mode === "focus"
           ? preferences.focusMinutes : mode === "shortBreak" ? preferences.shortBreakMinutes : preferences.longBreakMinutes,
         current: active,
-        done: mode === "focus" ? index < timer.completedFocuses : active && timer.status === "completed",
+        done: mode === "focus" ? index < timer.completedFocuses :
+          (active && timer.status === "completed") ||
+          (timer.completedBreaks?.some((entry) => entry.mode === mode && entry.afterFocus === index + 1) ?? false),
       });
     }
   }
@@ -43,7 +45,7 @@ export function cycleLayout(availableWidth: number, sessions: number) {
   const inset = 28;
   const count = sessions * 2;
   const rx = (width - inset * 2) / 2;
-  for (let height = 200; height <= 800; height += 4) {
+  for (let height = 232; height <= 800; height += 4) {
     const ry = (height - inset * 2) / 2;
     let length = 0;
     const samples = Array.from({ length: 361 }, (_, index) => {

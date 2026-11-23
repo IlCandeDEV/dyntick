@@ -34,10 +34,12 @@ POMODORO TIMER:
 ACTIVITY:
 - Activity tracker for session
 - GitHub style calendar visualization
+- Monthly focus-time chart with a seven-day average and an all-time daily high.
 
 PLANNING:
 - Exam planning and subdivision for each session/semester
 - Automatic course credit calculation
+- Exam dates, customizable session months and support for multiple credit systems.
 
 SYNC:
 - Sync data across all devices.
@@ -128,6 +130,8 @@ Personally I want my data private, without the need to rely on other people clos
 
 
 ## Updating & versions
+
+The footer shows the installed build and the latest public GitHub release. Your Dyntick server checks GitHub for release information and caches the result. The timer and stored activity remain available when that check is offline.
 
 The default Compose follows the latest stable image. To update:
 

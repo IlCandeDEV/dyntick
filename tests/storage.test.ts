@@ -16,7 +16,7 @@ function memoryStorage(): StorageLike {
 
 test("valid preferences round-trip through browser storage", () => {
   const storage = memoryStorage();
-  const custom = { ...preferences, focusMinutes: 45, theme: "dark" as const, soundEnabled: false };
+  const custom = { ...preferences, focusMinutes: 45, theme: "dark" as const, soundEnabled: false, creditSystem: "ECTS" as const, dateFormat: "mdy" as const };
   equal(writeStorage(storage, PREFERENCES_KEY, custom), true);
   deepEqual(parsePreferences(readStorage(storage, PREFERENCES_KEY)), custom);
 });
@@ -25,7 +25,7 @@ test("invalid or missing preferences recover safely with field-level defaults", 
   for (const raw of [null, "not json", "null", "[]", "17"]) deepEqual(parsePreferences(raw), preferences);
   const result = parsePreferences(JSON.stringify({
     focusMinutes: 0, shortBreakMinutes: 8, longBreakMinutes: 181,
-    longBreakInterval: 1.5, soundEnabled: "yes", theme: "unrecognized",
+    longBreakInterval: 1.5, soundEnabled: "yes", theme: "unrecognized", creditSystem: "unrecognized", dateFormat: "unrecognized",
   }));
   deepEqual(result, { ...preferences, shortBreakMinutes: 8 });
 });

@@ -1,5 +1,4 @@
-import { Selector } from "@astryxdesign/core/Selector";
-import { Icon } from "./Icons.tsx";
+import { SelectMenu } from "./SelectMenu.tsx";
 import { LANGUAGE_OPTIONS } from "./i18n.ts";
 import { isLanguage, type Language } from "./timer.ts";
 
@@ -10,11 +9,8 @@ export function LanguagePicker({ language, label, onChange, disabled = false }: 
   disabled?: boolean;
 }) {
   return (
-    <Selector label={label} isLabelHidden value={language} isDisabled={disabled}
+    <SelectMenu label={label} icon="globe" className="language-picker" value={language} isDisabled={disabled}
       options={[...LANGUAGE_OPTIONS]} onChange={(value) => { if (isLanguage(value)) onChange(value); }}
-      variant="secondary" size="sm" presentation="popover" placement="below"
-      startIcon={<Icon name="globe" width="17" height="17" />}
-      containerClassName="language-picker" controlClassName="language-trigger"
       data-testid="language-selector" data-language={language}
       renderValue={(option) => <span className="language-value">
         <span className="language-full">{option.label}</span>

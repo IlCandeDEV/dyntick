@@ -7,7 +7,7 @@ on:
       version:
         description: Published stable distribution version
         required: true
-        default: "2.0.0"
+        default: "3.0.0"
         type: string
 
 permissions:

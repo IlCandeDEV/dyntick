@@ -26,7 +26,7 @@ export function CycleMap({ preferences, timer, copy }: { preferences: Preference
   useEffect(() => setInspection(null), [current?.id, preferences.longBreakInterval]);
 
   return (
-    <section className="cycle-panel" aria-labelledby="cycle-heading">
+    <section className="cycle-panel secondary-card" aria-labelledby="cycle-heading">
       <div className="section-heading"><h2 id="cycle-heading">{copy.cycleHeading}</h2><span>{completed}/{preferences.longBreakInterval}</span></div>
       <div className="cycle-map-viewport" ref={viewport} data-testid="cycle-map">
         <div className="cycle-map-canvas" style={{ height: layout.height }}>
@@ -36,7 +36,7 @@ export function CycleMap({ preferences, timer, copy }: { preferences: Preference
             {layout.arrows.map((point, index) => <path key={index} d="m-3-3 3 3-3 3"
               transform={`translate(${point.x} ${point.y}) rotate(${point.angle})`} />)}
           </svg>
-          <ol className="cycle-map-nodes" aria-label={copy.cycleSessions} aria-describedby="cycle-map-hint">
+          <ol className="cycle-map-nodes" aria-label={copy.cycleSessions}>
             {phases.map((phase, index) => {
               const point = layout.points[index];
               const state = phase.current ? timer.status === "completed" ? copy.completed : copy.current : phase.done ? copy.done : copy.cyclePreview;
@@ -57,9 +57,9 @@ export function CycleMap({ preferences, timer, copy }: { preferences: Preference
                     setInspection(phases[target].id);
                     event.currentTarget.closest("ol")?.querySelectorAll<HTMLButtonElement>("button")[target]?.focus({ preventScroll: true });
                   }}>
-                  <span className="cycle-node-face">{phase.mode === "focus"
-                    ? phase.done ? <Icon name="check" width="16" height="16" /> : phase.session
-                    : <Icon name={phase.mode === "longBreak" ? "armchair" : "cup"}
+                  <span className="cycle-node-face">{phase.done ? <Icon name="check" width="16" height="16" />
+                    : phase.mode === "focus" ? phase.session
+                    : <Icon name={phase.mode === "longBreak" ? "cup" : "pause"}
                       width={phase.mode === "longBreak" ? 20 : 16} height={phase.mode === "longBreak" ? 20 : 16} />}</span>
                 </button>
               </li>;
@@ -74,8 +74,7 @@ export function CycleMap({ preferences, timer, copy }: { preferences: Preference
           </div>
         </div>
       </div>
-      <p id="cycle-map-hint" className="cycle-map-hint">{copy.cycleMapHint}</p>
-      <div className="cycle-map-footer"><Icon name="repeat" width="16" height="16" /><p>{copy.cycleRepeats}</p></div>
+      <p className="study-card-note"><Icon name="info" width="16" height="16" /><span>{copy.cycleRepeats}</span></p>
     </section>
   );
 }

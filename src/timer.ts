@@ -1,3 +1,5 @@
+import type { CreditSystem, DateFormat } from "./planning.ts";
+
 export type Mode = "focus" | "shortBreak" | "longBreak";
 export type TimerStatus = "idle" | "running" | "paused" | "completed";
 export type ThemeMode = "system" | "light" | "dark";
@@ -15,6 +17,11 @@ export interface FocusCompletion {
   minutes: number;
 }
 
+export interface CompletedBreak {
+  mode: Exclude<Mode, "focus">;
+  afterFocus: number;
+}
+
 export interface Preferences {
   focusMinutes: number;
   shortBreakMinutes: number;
@@ -23,6 +30,8 @@ export interface Preferences {
   soundEnabled: boolean;
   theme: ThemeMode;
   language: Language;
+  creditSystem: CreditSystem;
+  dateFormat: DateFormat;
 }
 
 export interface TimerState {
@@ -33,6 +42,7 @@ export interface TimerState {
   remainingMs: number;
   endAt: number | null;
   completedFocuses: number;
+  completedBreaks?: readonly CompletedBreak[];
   completionId: number;
   focusSessionId: string | null;
   lastFocusCompletion: FocusCompletion | null;
@@ -46,6 +56,8 @@ export const DEFAULT_PREFERENCES: Readonly<Preferences> = Object.freeze({
   soundEnabled: true,
   theme: "system",
   language: "en",
+  creditSystem: "CFU",
+  dateFormat: "dmy",
 });
 
 export const MODES: readonly Mode[] = ["focus", "shortBreak", "longBreak"];
@@ -65,6 +77,7 @@ export function createTimer(
   completedFocuses = 0,
   completionId = 0,
   lastFocusCompletion: FocusCompletion | null = null,
+  completedBreaks: readonly CompletedBreak[] = [],
 ): TimerState {
   const durationMs = durationFor(mode, preferences);
   return {
@@ -75,6 +88,7 @@ export function createTimer(
     remainingMs: durationMs,
     endAt: null,
     completedFocuses,
+    completedBreaks,
     completionId,
     focusSessionId: null,
     lastFocusCompletion,
@@ -85,6 +99,19 @@ export function remainingAt(state: TimerState, now: number): number {
   return state.status === "running" && state.endAt !== null
     ? Math.max(0, Math.min(state.durationMs, state.endAt - now))
     : state.remainingMs;
+}
+
+function recordBreak(state: TimerState): readonly CompletedBreak[] {
+  const completed = state.completedBreaks ?? [];
+  const { mode, completedFocuses: afterFocus } = state;
+  if (mode === "focus" || afterFocus < 1 || afterFocus > MAX_CYCLE_SESSIONS ||
+    completed.some((entry) => entry.mode === mode && entry.afterFocus === afterFocus)) return completed;
+  return [...completed, { mode, afterFocus }];
+}
+
+function breakProgress(state: TimerState): readonly CompletedBreak[] {
+  // Older timers can still tell us whether the currently displayed break finished.
+  return state.completedBreaks ?? (state.status === "completed" ? recordBreak(state) : []);
 }
 
 /** Finish the current phase once. Never credit or start unattended future phases. */
@@ -105,6 +132,7 @@ export function settleTimer(state: TimerState, now: number): TimerState {
     remainingMs: 0,
     endAt: null,
     completedFocuses: state.completedFocuses + (state.mode === "focus" ? 1 : 0),
+    completedBreaks: recordBreak(state),
     completionId: state.completionId + 1,
     lastFocusCompletion,
   };
@@ -136,10 +164,9 @@ export function startTimer(
   let state = current;
   if (state.status === "completed") {
     const mode = nextMode(state, preferences);
-    const count = mode === "focus" && state.completedFocuses >= preferences.longBreakInterval
-      ? 0
-      : state.completedFocuses;
-    state = createTimer(preferences, mode, count, state.completionId, state.lastFocusCompletion);
+    const newCycle = mode === "focus" && state.completedFocuses >= preferences.longBreakInterval;
+    state = createTimer(preferences, mode, newCycle ? 0 : state.completedFocuses, state.completionId,
+      state.lastFocusCompletion, newCycle ? [] : breakProgress(state));
   }
   return {
     ...state,
@@ -160,7 +187,8 @@ export function resetTimer(state: TimerState, preferences: Preferences): TimerSt
   const count = state.mode === "focus" && state.status === "completed"
     ? Math.max(0, state.completedFocuses - 1)
     : state.completedFocuses;
-  return createTimer(preferences, state.mode, count, state.completionId, state.lastFocusCompletion);
+  const breaks = breakProgress(state).filter(({ afterFocus }) => afterFocus <= count);
+  return createTimer(preferences, state.mode, count, state.completionId, state.lastFocusCompletion, breaks);
 }
 
 export function selectMode(
@@ -169,20 +197,23 @@ export function selectMode(
   preferences: Preferences,
 ): TimerState {
   if (state.status === "running" || state.mode === mode) return state;
-  const count = mode === "focus" && state.completedFocuses >= preferences.longBreakInterval
-    ? 0
-    : state.completedFocuses;
-  return createTimer(preferences, mode, count, state.completionId, state.lastFocusCompletion);
+  const newCycle = mode === "focus" && state.completedFocuses >= preferences.longBreakInterval;
+  return createTimer(preferences, mode, newCycle ? 0 : state.completedFocuses, state.completionId,
+    state.lastFocusCompletion, newCycle ? [] : breakProgress(state));
 }
 
 export function updateDurations(state: TimerState, preferences: Preferences): TimerState {
   // Shortening a cycle keeps the current focus in its last available slot.
   const pendingFocus = state.mode === "focus" && state.status !== "completed";
   const count = Math.min(state.completedFocuses, preferences.longBreakInterval - (pendingFocus ? 1 : 0));
-  const current = count === state.completedFocuses ? state : { ...state, completedFocuses: count };
+  const current = count === state.completedFocuses ? state : {
+    ...state,
+    completedFocuses: count,
+    completedBreaks: breakProgress(state).filter(({ afterFocus }) => afterFocus <= count),
+  };
   // Never change a phase already in progress, including a paused phase.
   return current.status === "idle"
-    ? createTimer(preferences, current.mode, current.completedFocuses, current.completionId, current.lastFocusCompletion)
+    ? createTimer(preferences, current.mode, current.completedFocuses, current.completionId, current.lastFocusCompletion, breakProgress(current))
     : current;
 }
 

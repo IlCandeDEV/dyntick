@@ -8,12 +8,12 @@ on:
     inputs:
       version:
         description: Distribution version
-        default: "2.0.0"
+        default: "3.0.0"
         type: string
   workflow_call:
     inputs:
       version:
-        default: "2.0.0"
+        default: "3.0.0"
         type: string
       resolve_lock:
         description: Bootstrap a candidate Bun lockfile on the runner; never publish this run
@@ -29,7 +29,7 @@ jobs:
     timeout-minutes: 30
     env:
       PORT: "18080"
-      DYNTICK_VERSION: ${{ inputs.version || '2.0.0' }}
+      DYNTICK_VERSION: ${{ inputs.version || '3.0.0' }}
     steps:
       - uses: actions/checkout@v7
       - name: Verify the source excludes local development files

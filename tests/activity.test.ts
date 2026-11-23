@@ -1,7 +1,7 @@
 import { test } from "bun:test";
 import { deepEqual, equal, notEqual, strictEqual } from "node:assert/strict";
 import {
-  ACTIVITY_KEY, activityDays, emptyActivity, mergeActivity, parseActivity,
+  ACTIVITY_KEY, activityDays, calendarMonths, emptyActivity, localDayKey, mergeActivity, monthlyFocus, parseActivity,
   persistActivity, recordCompletion, sameActivity, serializeActivity,
 } from "../src/activity.ts";
 import { parseTimer, type StorageLike } from "../src/storage.ts";
@@ -14,6 +14,55 @@ const preferences = { ...DEFAULT_PREFERENCES };
 const start = new Date(2026, 10, 12, 23, 30).getTime();
 const completion = (id: string, completedAt = start, minutes = 25): FocusCompletion =>
   ({ id, completedAt, minutes });
+
+test("calendar months begin on their actual weekday and a leap day remains in February", () => {
+  const months = calendarMonths(2024);
+  equal(months.length, 12);
+  equal(months[0].startRow, 0);
+  equal(months[1].startRow, 3);
+  equal(months[2].startRow, 4);
+  equal(localDayKey(months[1].dates.at(-1)!), "2024-02-29");
+  equal(localDayKey(months[2].dates[0]), "2024-03-01");
+  equal(months.reduce((length, month) => length + month.dates.length, 0), 366);
+  equal(calendarMonths(2025)[1].dates.length, 28);
+});
+
+test("time tracking sums daily study, includes zero days in the moving average, and keeps a historical record", () => {
+  const activity = emptyActivity();
+  for (const [id, date, minutes] of [
+    ["older", new Date(2023, 11, 31, 12), 180],
+    ["first", new Date(2024, 1, 1, 12), 21],
+    ["second-a", new Date(2024, 1, 2, 12), 42],
+    ["second-b", new Date(2024, 1, 2, 16), 21],
+    ["eighth", new Date(2024, 1, 8, 12), 14],
+    ["future-a", new Date(2024, 1, 9, 12), 180],
+    ["future-b", new Date(2024, 1, 9, 16), 180],
+  ] as const) activity.entries[id] = completion(id, date.getTime(), minutes);
+  const february = monthlyFocus(activityDays(activity), "2024-02-08");
+  equal(february.daysInMonth, 29);
+  deepEqual(february.minutes, [21, 63, 0, 0, 0, 0, 0, 14]);
+  deepEqual(february.averages, [21, 42, 28, 21, 16.8, 14, 12, 11]);
+  equal(february.record, 180);
+
+  const nextMonth = monthlyFocus(activityDays(activity), "2024-03-01");
+  deepEqual(nextMonth.minutes, [0]);
+  deepEqual(nextMonth.averages, [0]);
+  equal(nextMonth.record, 360);
+  equal(monthlyFocus({}, "2024-03-01").record, 0);
+
+  const historical = monthlyFocus(activityDays(activity), "2024-03-01", { year: 2024, month: 2 });
+  equal(historical.monthKey, "2024-02");
+  equal(historical.minutes.length, 29);
+  equal(historical.minutes[8], 360);
+  equal(historical.record, nextMonth.record);
+
+  const future = monthlyFocus(activityDays(activity), "2024-02-08", { year: 2025, month: 2 });
+  equal(future.monthKey, "2025-02");
+  equal(future.daysInMonth, 28);
+  deepEqual(future.minutes, []);
+  deepEqual(future.averages, []);
+  equal(future.record, 180);
+});
 
 test("activity parsing recovers damaged data and validates each completion independently", () => {
   for (const raw of [null, "broken", "null", "[]", "{}", '{"version":2,"entries":{}}']) {

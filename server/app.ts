@@ -1,9 +1,11 @@
 import { readFileSync, realpathSync, statSync } from "node:fs";
 import { extname, relative, resolve } from "node:path";
 import { parseActivity } from "../src/activity.ts";
+import { EXAM_MONTHS, EXAM_SESSIONS, isCreditSystem, isDateFormat, isExamDate, isExamMonth, isExamSession, MAX_EXAM_CREDITS, MAX_EXAM_NAME_LENGTH, type ExamSession } from "../src/planning.ts";
 import type { Action } from "../src/protocol.ts";
 import { isLanguage, MAX_CYCLE_SESSIONS, MODES, type Preferences } from "../src/timer.ts";
 import { StateConflict, StudyDatabase } from "./db.ts";
+import { createLatestReleaseLookup, type ReleaseFetch } from "./releases.ts";
 
 const MAX_BODY = 2 * 1024 * 1024;
 const SECURITY_HEADERS = {
@@ -34,6 +36,35 @@ function integer(value: unknown, min: number, max: number) {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= min && value <= max;
 }
 
+function examName(value: unknown): string {
+  const name = typeof value === "string" ? value.trim() : "";
+  if (!name || name.length > MAX_EXAM_NAME_LENGTH) throw new HttpError(400, "invalid_exam_name");
+  return name;
+}
+
+function examSession(value: unknown): ExamSession | null {
+  if (value === null || isExamSession(value)) return value;
+  throw new HttpError(400, "invalid_exam_session");
+}
+
+function examCredits(value: unknown): number {
+  if (typeof value !== "number" || !integer(value, 0, MAX_EXAM_CREDITS)) throw new HttpError(400, "invalid_exam_credits");
+  return value;
+}
+
+function examDate(value: unknown): string | null {
+  if (value === null || isExamDate(value)) return value;
+  throw new HttpError(400, "invalid_exam_date");
+}
+
+function examMonths(value: unknown) {
+  if (!Array.isArray(value) || value.length === 0 || value.length > EXAM_MONTHS.length ||
+      !value.every(isExamMonth) || new Set(value).size !== value.length) {
+    throw new HttpError(400, "invalid_session_months");
+  }
+  return EXAM_MONTHS.filter((month) => value.includes(month));
+}
+
 function actionFrom(value: unknown): Action {
   if (!object(value)) throw new HttpError(400, "invalid_action");
   if (value.type === "start" || value.type === "pause" || value.type === "reset") {
@@ -45,19 +76,62 @@ function actionFrom(value: unknown): Action {
     if (!MODES.includes(value.mode as typeof MODES[number])) throw new HttpError(400, "invalid_mode");
     return { type: "mode", mode: value.mode as typeof MODES[number] };
   }
+  if (value.type === "exam.create" && object(value.exam)) {
+    only(value, ["type", "exam"]);
+    only(value.exam, ["id", "name", "academicYear", "session", "credits", "examDate"]);
+    const { id: examId, name, academicYear, session } = value.exam;
+    id(examId);
+    if (typeof academicYear !== "number" || !integer(academicYear, 1000, 9998)) throw new HttpError(400, "invalid_academic_year");
+    return { type: value.type, exam: { id: examId, name: examName(name), academicYear, session: examSession(session),
+      ...("credits" in value.exam ? { credits: examCredits(value.exam.credits) } : {}),
+      ...("examDate" in value.exam ? { examDate: examDate(value.exam.examDate) } : {}),
+    } };
+  }
+  if (value.type === "exam.update" && object(value.patch)) {
+    only(value, ["type", "id", "patch"]);
+    only(value.patch, ["name", "session", "credits", "examDate"]);
+    id(value.id);
+    if (Object.keys(value.patch).length === 0) throw new HttpError(400, "invalid_action");
+    return { type: value.type, id: value.id, patch: {
+      ...("name" in value.patch ? { name: examName(value.patch.name) } : {}),
+      ...("session" in value.patch ? { session: examSession(value.patch.session) } : {}),
+      ...("credits" in value.patch ? { credits: examCredits(value.patch.credits) } : {}),
+      ...("examDate" in value.patch ? { examDate: examDate(value.patch.examDate) } : {}),
+    } };
+  }
+  if (value.type === "exam.delete") {
+    only(value, ["type", "id"]);
+    id(value.id);
+    return { type: value.type, id: value.id };
+  }
+  if (value.type === "session.months") {
+    only(value, ["type", "session", "months"]);
+    const { session, months } = value;
+    if (!isExamSession(session)) throw new HttpError(400, "invalid_exam_session");
+    return { type: value.type, session, months: examMonths(months) };
+  }
   if (value.type === "preferences" && object(value.patch)) {
-    only(value, ["type", "patch"]);
+    only(value, ["type", "patch", "sessionMonths"]);
     const patch = value.patch;
-    only(patch, ["focusMinutes", "shortBreakMinutes", "longBreakMinutes", "longBreakInterval", "soundEnabled", "theme", "language"]);
+    only(patch, ["focusMinutes", "shortBreakMinutes", "longBreakMinutes", "longBreakInterval", "soundEnabled", "theme", "language", "creditSystem", "dateFormat"]);
     for (const [key, next] of Object.entries(patch)) {
       const valid = key === "longBreakInterval" ? integer(next, 1, MAX_CYCLE_SESSIONS)
         : key === "soundEnabled" ? typeof next === "boolean"
         : key === "theme" ? next === "system" || next === "light" || next === "dark"
         : key === "language" ? isLanguage(next)
+        : key === "creditSystem" ? isCreditSystem(next)
+        : key === "dateFormat" ? isDateFormat(next)
         : integer(next, 1, 180);
       if (!valid) throw new HttpError(400, "invalid_preferences");
     }
-    return { type: "preferences", patch: patch as Partial<Preferences> };
+    const action: Extract<Action, { type: "preferences" }> = { type: "preferences", patch: patch as Partial<Preferences> };
+    if ("sessionMonths" in value) {
+      const months = value.sessionMonths;
+      if (!object(months)) throw new HttpError(400, "invalid_session_months");
+      only(months, EXAM_SESSIONS);
+      action.sessionMonths = { winter: examMonths(months.winter), summer: examMonths(months.summer), resit: examMonths(months.resit) };
+    }
+    return action;
   }
   throw new HttpError(400, "invalid_action");
 }
@@ -106,10 +180,12 @@ export interface ApplicationOptions {
   databasePath: string;
   staticDirectory?: string;
   now?: () => number;
+  fetchRelease?: ReleaseFetch;
 }
 
 export function createApplication(options: ApplicationOptions) {
   const database = new StudyDatabase(options.databasePath, options.now);
+  const latestRelease = createLatestReleaseLookup(options.fetchRelease, options.now);
   const directory = options.staticDirectory ? realpathSync(options.staticDirectory) : null;
   const cache = new Map<string, { data: Uint8Array<ArrayBuffer>; gzip: Uint8Array<ArrayBuffer> | null; type: string }>();
   const json = (value: unknown, status = 200, extra: Record<string, string> = {}) =>
@@ -130,6 +206,10 @@ export function createApplication(options: ApplicationOptions) {
         if (url.pathname === "/api/state") {
           if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405, { Allow: "GET" });
           return json(database.read());
+        }
+        if (url.pathname === "/api/latest-release") {
+          if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405, { Allow: "GET" });
+          return json({ version: await latestRelease() });
         }
         if (url.pathname === "/api/action" || url.pathname === "/api/import") {
           if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405, { Allow: "POST" });

@@ -5,7 +5,7 @@ import re
 import shutil
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--version", default="2.0.0")
+parser.add_argument("--version", default="3.0.0")
 parser.add_argument("--site", default="dist")
 parser.add_argument("--output", default=".ci-output/distribution")
 args = parser.parse_args()

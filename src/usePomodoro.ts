@@ -10,14 +10,13 @@ import {
   TIMER_KEY,
 } from "./storage.ts";
 import { createTimer, DEFAULT_PREFERENCES, type Mode, type Preferences } from "./timer.ts";
-import type { Action, Snapshot } from "./protocol.ts";
+import { DEFAULT_SESSION_MONTHS, type Exam, type PlanningAction, type SessionMonths } from "./planning.ts";
+import { newClientId, type Action, type Snapshot } from "./protocol.ts";
 
 type Connection = "loading" | "online" | "offline";
 type PendingRequest = { path: string; body: Record<string, unknown> };
 
-function requestId(): string {
-  return globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-}
+const NO_EXAMS: readonly Exam[] = [];
 
 async function request(path: string, body?: Record<string, unknown>) {
   return fetch(path, {
@@ -52,6 +51,7 @@ export function usePomodoro() {
   const initialActivity = useRef(emptyActivity());
 
   const audioInstance = useCallback(() => audio.current ??= new TimerAudio(), []);
+  const getNow = useCallback(() => Date.now() + clockOffset.current, []);
 
   const accept = useCallback((incoming: Snapshot) => {
     if (!mounted.current) return;
@@ -137,7 +137,7 @@ export function usePomodoro() {
           pending.current = {
             path: "/api/import",
             body: {
-              requestId: requestId(),
+              requestId: newClientId(),
               instanceId: current.instanceId,
               ...(preferencesRaw ? { preferences } : {}),
               ...(timerRaw ? { timer: parseTimer(timerRaw, preferences, current.serverNow) } : {}),
@@ -178,9 +178,9 @@ export function usePomodoro() {
   }, [refresh]);
 
   useEffect(() => {
-    const interval = globalThis.setInterval(() => setNow(Date.now() + clockOffset.current), 250);
+    const interval = globalThis.setInterval(() => setNow(getNow()), 250);
     return () => globalThis.clearInterval(interval);
-  }, []);
+  }, [getNow]);
 
   useEffect(() => () => {
     audio.current?.dispose();
@@ -193,7 +193,7 @@ export function usePomodoro() {
     if (!readyRef.current || !current || mutationInFlight.current || pending.current || connection !== "online") return false;
     pending.current = {
       path: "/api/action",
-      body: { requestId: requestId(), instanceId: current.instanceId, revision: current.revision, action },
+      body: { requestId: newClientId(), instanceId: current.instanceId, revision: current.revision, action },
     };
     setConflict(false);
     return sendPending();
@@ -202,15 +202,15 @@ export function usePomodoro() {
   const preferences = snapshot?.preferences ?? defaults.current;
   const timer = snapshot?.timer ?? initialTimer.current;
 
-  const savePreferences = useCallback(async (next: Preferences) => {
+  const savePreferences = useCallback(async (next: Preferences, sessionMonths?: Readonly<SessionMonths>) => {
     const current = snapshotRef.current;
     if (!current) return false;
     const patch = Object.fromEntries(Object.entries(next).filter(([key, value]) =>
       value !== preferences[key as keyof Preferences]
     )) as Partial<Preferences>;
-    if (Object.keys(patch).length === 0) return true;
+    if (Object.keys(patch).length === 0 && !sessionMonths) return true;
     if (next.soundEnabled) void audioInstance().unlock();
-    return perform({ type: "preferences", patch });
+    return perform({ type: "preferences", patch, sessionMonths });
   }, [audioInstance, perform, preferences]);
 
   const primaryAction = useCallback(async () => {
@@ -220,6 +220,7 @@ export function usePomodoro() {
 
   const reset = useCallback(() => perform({ type: "reset" }), [perform]);
   const changeMode = useCallback((mode: Mode) => perform({ type: "mode", mode }), [perform]);
+  const changePlanning = useCallback((action: PlanningAction) => perform(action), [perform]);
   const previewSound = useCallback(async () => {
     const instance = audioInstance();
     const available = await instance.unlock();
@@ -228,15 +229,17 @@ export function usePomodoro() {
   }, [audioInstance]);
 
   return {
-    preferences, timer, now,
+    preferences, timer, now, getNow,
     revision: snapshot?.revision ?? -1,
     instanceId: snapshot?.instanceId,
     activity: snapshot?.activity ?? initialActivity.current,
+    exams: snapshot?.exams ?? NO_EXAMS,
+    sessionMonths: snapshot?.sessionMonths ?? DEFAULT_SESSION_MONTHS,
     connection, busy, conflict, ready,
     controlsDisabled: !ready || connection !== "online" || busy || pending.current !== null,
     retry: refresh,
     activityPersisted: connection === "online" && !busy,
     storageAvailable: connection === "online" && !busy,
-    savePreferences, primaryAction, reset, changeMode, previewSound,
+    savePreferences, primaryAction, reset, changeMode, changePlanning, previewSound,
   };
 }

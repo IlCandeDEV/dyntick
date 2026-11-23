@@ -1,7 +1,7 @@
 import { test } from "bun:test";
 import { deepEqual, equal, ok } from "node:assert/strict";
 import { cyclePhases, cycleLayout } from "../src/cycle.ts";
-import { createTimer, DEFAULT_PREFERENCES, startTimer, settleTimer, type Preferences } from "../src/timer.ts";
+import { createTimer, DEFAULT_PREFERENCES, pauseTimer, selectMode, startTimer, settleTimer, type Preferences } from "../src/timer.ts";
 
 test("configured cycles contain one focus and one following break per session", () => {
   for (const count of [1, 4, 6]) {
@@ -26,16 +26,32 @@ test("cycle follows focus, break, long break and restart without changing timer 
   ok(cyclePhases(p, timer)[0].done);
   timer = startTimer(timer, p, 2_000_000);
   equal(current(), "shortBreak-1");
+  equal(cyclePhases(p, timer)[1].done, false);
   timer = settleTimer(timer, 3_000_000);
+  ok(cyclePhases(p, timer)[1].done);
   timer = startTimer(timer, p, 4_000_000);
   equal(current(), "focus-2");
+  ok(cyclePhases(p, timer)[1].done);
   timer = settleTimer(timer, 6_000_000);
   timer = startTimer(timer, p, 7_000_000);
   equal(current(), "longBreak-2");
   timer = settleTimer(timer, 8_000_000);
+  ok(cyclePhases(p, timer).every((phase) => phase.done));
   timer = startTimer(timer, p, 9_000_000);
   equal(current(), "focus-1");
   equal(timer.completedFocuses, 0);
+  ok(cyclePhases(p, timer).every((phase) => !phase.done));
+});
+
+test("moving on from an unfinished break leaves its cycle step unmarked", () => {
+  const p = DEFAULT_PREFERENCES;
+  const focus = startTimer(createTimer(p), p, 0);
+  const finished = settleTimer(focus, focus.endAt!);
+  const rest = startTimer(finished, p, focus.endAt!);
+  const skipped = selectMode(pauseTimer(rest, rest.endAt! - 1), "focus", p);
+  const phases = cyclePhases(p, skipped);
+  equal(phases[1].done, false);
+  equal(phases[2].current, true);
 });
 
 test("manual breaks never imply that planned focus sessions were completed", () => {

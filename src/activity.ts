@@ -13,6 +13,10 @@ export interface ActivityDay {
   minutes: number;
 }
 
+export function localDayKey(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
 export function emptyActivity(): StudyActivity {
   return { version: 1, entries: {} };
 }
@@ -74,12 +78,44 @@ export function activityDays(activity: StudyActivity): Record<string, ActivityDa
   for (const completion of Object.values(activity.entries)) {
     const date = new Date(completion.completedAt);
     if (!Number.isFinite(date.getTime())) continue;
-    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+    const key = localDayKey(date);
     const day = days[key] ??= { sessions: 0, minutes: 0 };
     day.sessions += 1;
     day.minutes += completion.minutes;
   }
   return days;
+}
+
+export function calendarMonths(year: number) {
+  return Array.from({ length: 12 }, (_, month) => {
+    const first = new Date(year, month, 1, 12);
+    const length = new Date(year, month + 1, 0, 12).getDate();
+    const startRow = (first.getDay() + 6) % 7;
+    const dates = Array.from({ length }, (_, index) => new Date(year, month, index + 1, 12));
+    return { first, startRow, dates };
+  });
+}
+
+export function monthlyFocus(days: Record<string, ActivityDay>, today: string, period?: { year: number; month: number }) {
+  const [currentYear, currentMonth, dayOfMonth] = today.split("-").map(Number);
+  const { year, month } = period ?? { year: currentYear, month: currentMonth };
+  const first = new Date(year, month - 1, 1, 12);
+  const daysInMonth = new Date(year, month, 0, 12).getDate();
+  const monthKey = localDayKey(first).slice(0, -3);
+  const currentMonthKey = today.slice(0, -3);
+  const elapsed = monthKey < currentMonthKey ? daysInMonth : monthKey === currentMonthKey ? dayOfMonth : 0;
+  const minutes = Array.from({ length: elapsed }, (_, index) =>
+    days[`${monthKey}-${String(index + 1).padStart(2, "0")}`]?.minutes ?? 0);
+  let windowTotal = 0;
+  const averages = minutes.map((value, index) => {
+    windowTotal += value - (minutes[index - 7] ?? 0);
+    return windowTotal / Math.min(index + 1, 7);
+  });
+  const record = Object.entries(days).reduce((highest, [date, entry]) => {
+    const hasElapsed = date.length < today.length || (date.length === today.length && date <= today);
+    return hasElapsed ? Math.max(highest, entry.minutes) : highest;
+  }, 0);
+  return { first, monthKey, daysInMonth, minutes, averages, record };
 }
 
 export function sameActivity(left: StudyActivity, right: StudyActivity): boolean {

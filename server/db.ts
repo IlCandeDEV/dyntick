@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import { mkdirSync, chmodSync } from "node:fs";
 import { dirname } from "node:path";
 import { emptyActivity, mergeActivity, recordCompletion, type StudyActivity } from "../src/activity.ts";
+import { DEFAULT_SESSION_MONTHS, EXAM_SESSIONS, MAX_EXAM_CREDITS, type Exam, type ExamMonth, type ExamSession, type PlanningAction } from "../src/planning.ts";
 import type { Action, Snapshot } from "../src/protocol.ts";
 import { parsePreferences, parseTimer } from "../src/storage.ts";
 import {
@@ -18,6 +19,7 @@ interface StateRow {
 }
 interface CompletionRow { id: string; completed_at: number; minutes: number }
 interface RequestRow { fingerprint: string }
+interface SessionMonthsRow { session: ExamSession; months: string }
 
 export class StateConflict extends Error {
   constructor(public state: Snapshot, public code = "conflict") { super(code); }
@@ -33,9 +35,11 @@ export class StudyDatabase {
     if (path !== ":memory:") chmodSync(path, 0o600);
     try {
       this.db.exec("PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL;");
-      const version = this.db.query<{ user_version: number }, []>("PRAGMA user_version").get()!.user_version;
-      if (version > 1) throw new Error("This database needs a newer version of Dyntick.");
       this.db.transaction(() => {
+        const version = this.db.query<{ user_version: number }, []>("PRAGMA user_version").get()!.user_version;
+        if (version > 5) throw new Error("This database needs a newer version of Dyntick.");
+        // Version 2 had a 12-credit CHECK constraint that SQLite cannot widen in place.
+        if (version === 2) this.db.exec("ALTER TABLE exams RENAME TO exams_v2;");
         this.db.exec(`
           CREATE TABLE IF NOT EXISTS study_state (
             id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -54,8 +58,38 @@ export class StudyDatabase {
             id TEXT PRIMARY KEY,
             fingerprint TEXT NOT NULL
           );
-          PRAGMA user_version = 1;
+          CREATE TABLE IF NOT EXISTS exams (
+            id TEXT PRIMARY KEY NOT NULL,
+            name TEXT NOT NULL,
+            academic_year INTEGER NOT NULL CHECK (academic_year BETWEEN 1000 AND 9998),
+            session TEXT CHECK (session IN ('winter', 'summer', 'resit'))
+          );
+          CREATE TABLE IF NOT EXISTS session_months (
+            session TEXT PRIMARY KEY NOT NULL CHECK (session IN ('winter', 'summer', 'resit')),
+            months TEXT NOT NULL
+          );
         `);
+        if (version < 3) {
+          this.db.exec(`
+            ALTER TABLE exams ADD COLUMN credits INTEGER NOT NULL DEFAULT 0
+              CHECK (typeof(credits) = 'integer' AND credits BETWEEN 0 AND ${MAX_EXAM_CREDITS});
+          `);
+          if (version === 2) this.db.exec(`
+            INSERT INTO exams (rowid, id, name, academic_year, session, credits)
+              SELECT rowid, id, name, academic_year, session, credits FROM exams_v2;
+            DROP TABLE exams_v2;
+          `);
+          this.db.query("UPDATE study_state SET preferences = json_insert(preferences, '$.creditSystem', ?)")
+            .run(DEFAULT_PREFERENCES.creditSystem);
+        }
+        if (version < 4) {
+          this.db.exec("ALTER TABLE exams ADD COLUMN exam_date TEXT;");
+        }
+        if (version < 5) {
+          this.db.query("UPDATE study_state SET preferences = json_insert(preferences, '$.dateFormat', ?)")
+            .run(DEFAULT_PREFERENCES.dateFormat);
+          this.db.exec("PRAGMA user_version = 5;");
+        }
         this.db.query("INSERT OR IGNORE INTO study_state (id, instance_id, preferences, timer) VALUES (1, ?, ?, ?)")
           .run(crypto.randomUUID(), JSON.stringify(DEFAULT_PREFERENCES), JSON.stringify(createTimer(DEFAULT_PREFERENCES)));
       }).immediate();
@@ -97,9 +131,15 @@ export class StudyDatabase {
 
   private snapshot(timestamp: number): Snapshot {
     const row = this.row();
+    const sessionMonths = { ...DEFAULT_SESSION_MONTHS };
+    for (const { session, months } of this.db.query<SessionMonthsRow, []>("SELECT session, months FROM session_months").all()) {
+      sessionMonths[session] = JSON.parse(months) as ExamMonth[];
+    }
     return { schemaVersion: 2, instanceId: row.instance_id, revision: row.revision,
       initialized: row.initialized === 1, serverNow: timestamp,
-      preferences: JSON.parse(row.preferences), timer: JSON.parse(row.timer), activity: this.activity() };
+      preferences: JSON.parse(row.preferences), timer: JSON.parse(row.timer), activity: this.activity(),
+      exams: this.db.query<Exam, []>("SELECT id, name, academic_year AS academicYear, session, credits, exam_date AS examDate FROM exams ORDER BY rowid").all(),
+      sessionMonths };
   }
 
   read(): Snapshot {
@@ -122,6 +162,33 @@ export class StudyDatabase {
     this.db.query("INSERT INTO requests (id, fingerprint) VALUES (?, ?)").run(requestId, fingerprint);
   }
 
+  private saveSessionMonths(session: ExamSession, months: readonly ExamMonth[]) {
+    this.db.query("INSERT INTO session_months (session, months) VALUES (?, ?) ON CONFLICT(session) DO UPDATE SET months = excluded.months")
+      .run(session, JSON.stringify(months));
+  }
+
+  private changePlanning(action: PlanningAction): boolean {
+    switch (action.type) {
+      case "exam.create": {
+        const { id, name, academicYear, session, credits = 0, examDate = null } = action.exam;
+        return this.db.query("INSERT INTO exams (id, name, academic_year, session, credits, exam_date) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING")
+          .run(id, name, academicYear, session, credits, examDate).changes > 0;
+      }
+      case "exam.update": {
+        const { name, session, credits, examDate } = action.patch;
+        return this.db.query(`UPDATE exams SET name = COALESCE(?, name), session = CASE WHEN ? THEN ? ELSE session END,
+          credits = COALESCE(?, credits), exam_date = CASE WHEN ? THEN ? ELSE exam_date END WHERE id = ?`)
+          .run(name ?? null, session === undefined ? 0 : 1, session ?? null, credits ?? null,
+            examDate === undefined ? 0 : 1, examDate ?? null, action.id).changes > 0;
+      }
+      case "exam.delete":
+        return this.db.query("DELETE FROM exams WHERE id = ?").run(action.id).changes > 0;
+      case "session.months":
+        this.saveSessionMonths(action.session, action.months);
+        return true;
+    }
+  }
+
   action(requestId: string, revision: number, action: Action): Snapshot {
     const fingerprint = new Bun.CryptoHasher("sha256").update(JSON.stringify({ revision, action })).digest("hex");
     // A conflict is returned after settling, so expiry is durable even for a stale command.
@@ -131,6 +198,12 @@ export class StudyDatabase {
       if (this.duplicate(requestId, fingerprint)) return { state: this.snapshot(timestamp) };
       const row = this.row();
       if (row.revision !== revision) return { conflict: this.snapshot(timestamp) };
+      if (action.type === "exam.create" || action.type === "exam.update" || action.type === "exam.delete" || action.type === "session.months") {
+        if (!this.changePlanning(action)) return { conflict: this.snapshot(timestamp) };
+        this.db.query("UPDATE study_state SET revision = revision + 1 WHERE id = 1").run();
+        this.remember(requestId, fingerprint);
+        return { state: this.snapshot(timestamp) };
+      }
       let timer = JSON.parse(row.timer) as TimerState;
       let preferences = JSON.parse(row.preferences) as Preferences;
       switch (action.type) {
@@ -141,6 +214,9 @@ export class StudyDatabase {
         case "preferences":
           preferences = { ...preferences, ...action.patch };
           timer = updateDurations(timer, preferences);
+          if (action.sessionMonths) {
+            for (const session of EXAM_SESSIONS) this.saveSessionMonths(session, action.sessionMonths[session]);
+          }
           break;
       }
       this.save(row, timer, preferences, 1);

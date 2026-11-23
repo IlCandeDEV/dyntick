@@ -1,3 +1,4 @@
+import { isCreditSystem, isDateFormat } from "./planning.ts";
 import {
   createTimer,
   DEFAULT_PREFERENCES,
@@ -5,6 +6,7 @@ import {
   MAX_CYCLE_SESSIONS,
   MODES,
   settleTimer,
+  type CompletedBreak,
   type FocusCompletion,
   type Preferences,
   type TimerState,
@@ -44,6 +46,8 @@ export function parsePreferences(raw: string | null): Preferences {
       defaults.theme = value.theme;
     }
     if (isLanguage(value.language)) defaults.language = value.language;
+    if (isCreditSystem(value.creditSystem)) defaults.creditSystem = value.creditSystem;
+    if (isDateFormat(value.dateFormat)) defaults.dateFormat = value.dateFormat;
   } catch { /* A damaged or older preference file must not prevent opening the app. */ }
   return defaults;
 }
@@ -78,6 +82,12 @@ export function parseTimer(raw: string | null, preferences: Preferences, now: nu
         value.focusSessionId.length > 0 && value.focusSessionId.length <= 128
       ? value.focusSessionId
       : null;
+    const maxBreakPosition = Math.min(value.completedFocuses, MAX_CYCLE_SESSIONS);
+    const completedBreaks = Array.isArray(value.completedBreaks) ? value.completedBreaks.flatMap<CompletedBreak>((entry: unknown) => {
+      if (!record(entry) || (entry.mode !== "shortBreak" && entry.mode !== "longBreak") ||
+        !integer(entry.afterFocus, 1, maxBreakPosition)) return [];
+      return [{ mode: entry.mode, afterFocus: entry.afterFocus }];
+    }).slice(0, MAX_CYCLE_SESSIONS * 2) : undefined;
     return settleTimer({
       version: 1,
       mode: value.mode as TimerState["mode"],
@@ -86,6 +96,7 @@ export function parseTimer(raw: string | null, preferences: Preferences, now: nu
       remainingMs: value.remainingMs,
       endAt: value.endAt as number | null,
       completedFocuses: value.completedFocuses,
+      ...(completedBreaks && { completedBreaks }),
       completionId: value.completionId,
       focusSessionId,
       lastFocusCompletion,
