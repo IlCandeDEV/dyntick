@@ -176,6 +176,9 @@ async function verifyResponsiveCycle() {
       await showStudyPage(page, "pomodoro");
       const unit = sessions === 1 ? "session" : "sessions";
       await todayNote.getByText(`One full cycle consists of ${sessions} ${unit}.`, { exact: true }).waitFor();
+      // The panel slides in at fractional coordinates. Measure its settled touch targets.
+      await page.waitForFunction(() => document.querySelector("#panel-pomodoro")?.getAnimations()
+        .every((animation) => !animation.pending && animation.playState !== "running"));
       for (const width of [320, 390, 768, 1024, 1440]) {
         await page.setViewportSize({ width, height: 1050 });
         await page.waitForFunction(() => {
@@ -211,7 +214,8 @@ async function verifyResponsiveCycle() {
         equal(geometry.targets.length, sessions * 2);
         for (let index = 0; index < geometry.targets.length; index++) {
           const a = geometry.targets[index];
-          ok(a.width >= 44 && a.height >= 44, "Cycle targets must keep their touch size");
+          ok(a.width >= 44 && a.height >= 44,
+            `Cycle target ${index + 1} measures ${a.width}×${a.height}px for ${sessions} sessions at ${width}px, below the 44×44px minimum`);
           for (const b of geometry.targets.slice(index + 1)) {
             ok(a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top, "Cycle hitboxes must not overlap");
           }
