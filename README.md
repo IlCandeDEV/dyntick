@@ -12,13 +12,13 @@ At some point I thought that maybe other people would take advantage of this too
 
 ## Preview
 
-![Dyntick 2.0.0 main page in the light theme](docs/screenshots/pomodoro-v2.0.0-light.png)
+![Dyntick 3.0.0 main page in the light theme](docs/screenshots/pomodoro-v3.0.0-light.png)
 
-*Light theme · Dyntick 2.0.0.*
+*Light theme · Dyntick 3.0.0.*
 
-![Dyntick 2.0.0 main page in the dark theme](docs/screenshots/pomodoro-v2.0.0-dark.png)
+![Dyntick 3.0.0 main page in the dark theme](docs/screenshots/pomodoro-v3.0.0-dark.png)
 
-*Dark theme · Dyntick 2.0.0.*
+*Dark theme · Dyntick 3.0.0.*
 
 
 
