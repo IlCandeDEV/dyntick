@@ -186,13 +186,8 @@ To restore, keep Dyntick stopped while replacing its database files in the data 
 | Tests and build/release automation | [tests](tests), [.github/workflows](.github/workflows) |
 
 
-Dyntick uses:
-- TypeScript
-- React 19
-- Vite
-- Astryx interface
-- Bun
-- SQLite
+
+
 
 
 ## License
