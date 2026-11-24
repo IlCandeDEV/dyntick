@@ -72,12 +72,14 @@ Here's a step by step guide to install and use Dyntick.
 
 *Prerequisites*
 
-Install docker on your machine.
-> MACOS: https://docs.docker.com/desktop/setup/install/mac-install/
+Install Docker on your machine. Choose based on your OS.
 
-> LINUX: https://docs.docker.com/engine/install/
+|OS|Docker type|
+|---|---|
+|[MacOS](https://docs.docker.com/desktop/setup/install/mac-install/)|Docker Desktop|
+|[Windows](https://docs.docker.com/desktop/setup/install/windows-install/)|Docker Desktop|
+|[Linux](https://docs.docker.com/engine/install/)|Docker Engine|
 
-> WINDOWS: https://docs.docker.com/desktop/setup/install/windows-install/
 
 
 ### STEP 2
