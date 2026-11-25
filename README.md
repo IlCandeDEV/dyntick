@@ -24,39 +24,41 @@ At some point I thought that maybe other people would take advantage of this too
 
 ## Features
 
-POMODORO TIMER: 
-- Default 25-minute focus, 5-minute short break and 15-minute long break after four focus sessions.
-- Configurable duration for focus and breaks.
-- Sound alarm for timer.
+### Pomodoro timer: 
+- Default 25-minute focus, 5-minute short break and 15-minute long break after four focus sessions
+- Configurable duration for focus and breaks
+- Sound alarm for timer
 - Study cycle map to better manage study session
-- Stats for every session.
+- Stats for every session
 
-ACTIVITY:
+### Activity:
 - Activity tracker for session
 - GitHub style calendar visualization
-- Monthly focus-time chart with a seven-day average and an all-time daily high.
+- Monthly focus-time chart with a seven-day average and an all-time daily high
+- Activity history
 
-PLANNING:
+### Planning:
 - Exam planning and subdivision for each session/semester
 - Automatic course credit calculation
-- Exam dates, customizable session months and support for multiple credit systems.
+- Exam dates, customizable session months and support for multiple credit systems
 
-SYNC:
-- Sync data across all devices.
+### Sync:
+- Sync data across all devices that can reach your network
 
-LANGUAGE:
+### Language:
 - English (default)
 - Italian (best)
 - German
 - Spanish
 
-THEMES:
+### Themes:
 - System, light and dark themes
 
-ACCESSIBILITY:
+### Accessibility:
 - Reduced motion support for ADHD people like me
 - Reset settings to default
 - Keyboard controls for faster switch between tabs (vim style)
+- Automatic theme switch based on your pc mode
 
 
 
