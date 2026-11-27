@@ -70,9 +70,7 @@ At some point I thought that maybe other people would take advantage of this too
 
 Here's a step by step guide to install and use Dyntick.
 
-### STEP 1
-
-*Prerequisites*
+### STEP 1 - *Prerequisites*
 
 Install Docker on your machine. Choose based on your OS.
 
@@ -82,11 +80,23 @@ Install Docker on your machine. Choose based on your OS.
 |[Windows](https://docs.docker.com/desktop/setup/install/windows-install/)|Docker Desktop|
 |[Linux](https://docs.docker.com/engine/install/)|Docker Engine|
 
+Update Docker Desktop app if needed
 
+### STEP 2 - *Install*
 
-### STEP 2
+Create a folder for Dyntick install files on your server/homelab/pc (location not important)
 
-Copy [compose.yaml](compose.yaml) into an empty folder on your server/homelab/pc and run:
+```sh
+mkdir -p location/you/like/
+```
+
+Copy [compose.yaml](compose.yaml) into the new folder:
+
+```sh
+curl -o compose.yaml https://raw.githubusercontent.com/IlCandeDEV/dyntick/refs/heads/main/compose.yaml
+```
+
+and run it with:
 
 ```sh
 docker compose up -d
